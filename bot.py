@@ -583,18 +583,18 @@ def format_item_list(items: List[Dict]) -> str:
         text += f"<b>📁 {group_name.upper()}</b>\n\n"
         
         for item in group_items:
-            # Status bubble and owner
+            # Status icon and owner
             if not item['owner']:
-                bubble = '🟢'
+                icon = '✅'  # Free (same as free action)
                 owner_text = '-'
             else:
-                bubble = '🔴'
+                icon = '📍'  # Taken (same as take action)
                 owner_text = f"@{item['owner']}"
                 if item['purpose'] and item['purpose'].strip():
                     owner_text += f": {item['purpose']}"
             
-            # Main item line: - <bubble> item name #id: owner
-            text += f"• {bubble} <b><code>{item['name']}</code></b> : {owner_text}\n"
+            # Main item line: - <icon> item name #id: owner
+            text += f"• {icon} <b><code>{item['name']}</code></b> : {owner_text}\n"
             
             # Type and description on same line
             type_desc = f"{item['type_name'] or 'No type'}"
@@ -727,7 +727,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         text += "📋 <b>How to Use:</b>\n\n"
         text += "<b>1. See available items:</b>\n"
-        text += "<code>/list</code> → Shows all items with their status (🟢 free, 🔴 busy)\n"
+        text += "<code>/list</code> → Shows all items with their status (✅ free, 📍 taken)\n"
         text += "<code>/list group production</code> → Shows only production items\n"
         text += "<code>/list owner alice</code> → Shows items owned by alice\n\n"
         
