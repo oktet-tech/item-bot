@@ -646,6 +646,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += "• <code>/addmod</code> - Add moderator\n"
         text += "• <code>/delmod</code> - Remove moderator\n"
         text += "• <code>/listmod</code> - List moderators\n"
+        text += "• <code>/listhist</code> - View usage history\n"
         text += "• <code>/help admin</code> - Admin setup guide\n\n"
     
     text += "💡 <b>Pro Tips:</b>\n"
@@ -717,7 +718,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         text += "<code>/addmod &lt;username&gt;</code> - Add moderator\n"
         text += "<code>/delmod &lt;username&gt;</code> - Remove moderator\n"
-        text += "<code>/listmod</code> - List all moderators\n\n"
+        text += "<code>/listmod</code> - List all moderators\n"
+        text += "<code>/listhist [N]</code> - View latest N usage history entries (default: 10)\n\n"
         
     else:
         # Default user help
@@ -1401,6 +1403,89 @@ async def list_notify_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     await update.message.reply_html(text)
 
+async def list_history_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """List usage history (admin only)"""
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("You don't have permission to use this command.")
+        return
+    
+    # Parse limit argument
+    limit = 10  # default
+    if context.args:
+        try:
+            limit = int(context.args[0])
+            if limit <= 0 or limit > 100:
+                await update.message.reply_text("Please provide a number between 1 and 100.")
+                return
+        except ValueError:
+            await update.message.reply_text("Please provide a valid number.")
+            return
+    
+    # Get history from database
+    conn = bot.get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT h.timestamp, h.user, h.action, h.purpose, i.name as item_name, t.name as type_name
+        FROM usage_history h
+        LEFT JOIN items i ON h.item_id = i.id
+        LEFT JOIN types t ON i.type_id = t.id
+        ORDER BY h.timestamp DESC
+        LIMIT ?
+    ''', (limit,))
+    
+    history = cursor.fetchall()
+    conn.close()
+    
+    admin_user = update.effective_user.username or str(update.effective_user.id)
+    logger.info(f"Admin {admin_user} requested {limit} latest history entries")
+    
+    if not history:
+        await update.message.reply_text("No usage history found.")
+        return
+    
+    text = f"📊 <b>Latest {len(history)} Actions:</b>\n\n"
+    
+    for timestamp, user, action, purpose, item_name, type_name in history:
+        # Format timestamp
+        from datetime import datetime
+        try:
+            dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+            time_str = dt.strftime('%m/%d %H:%M')
+        except:
+            time_str = timestamp[:16]  # fallback
+        
+        # Choose emoji based on action
+        if action == 'take':
+            emoji = '📍'
+        elif action == 'free':
+            emoji = '✅'
+        elif action == 'steal':
+            emoji = '⚠️'
+        elif action == 'assign':
+            emoji = '👑'
+        else:
+            emoji = '🔄'
+        
+        # Format the entry
+        text += f"{emoji} <code>{time_str}</code> - <b>{item_name or 'Unknown'}</b>\n"
+        text += f"   {action.title()} by {user}"
+        
+        if purpose:
+            if action == 'assign':
+                text += f" ({purpose})"
+            else:
+                text += f" - <i>{purpose}</i>"
+        
+        if type_name:
+            text += f" [{type_name}]"
+        
+        text += "\n\n"
+    
+    # Log the history details
+    logger.info(f"Returned {len(history)} history entries to admin {admin_user}")
+    
+    await update.message.reply_html(text)
+
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Cancel the current operation"""
     await update.message.reply_text("Operation cancelled.")
@@ -1464,6 +1549,7 @@ def main():
     application.add_handler(CommandHandler("addnotify", add_notify_command))
     application.add_handler(CommandHandler("delnotify", remove_notify_command))
     application.add_handler(CommandHandler("listnotify", list_notify_command))
+    application.add_handler(CommandHandler("listhist", list_history_command))
     
     # Run the bot
     application.run_polling()
