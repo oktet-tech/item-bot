@@ -496,31 +496,47 @@ def format_item_list(items: List[Dict]) -> str:
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Send a message when the command /start is issued."""
     user = update.effective_user
-    text = f"Hi {user.mention_html()}! I'm a resource allocation bot.\n\n"
-    text += "Available commands:\n"
-    text += "/help - Get detailed help with examples\n"
-    text += "/list - List all items\n"
-    text += "/take - Take a free item\n"
-    text += "/free - Free an item you own\n"
-    text += "/steal - Steal an item from someone\n"
-    
     user_id = user.id
     username = user.username
     
+    text = f"👋 Welcome {user.mention_html()}!\n\n"
+    text += "🤖 I'm your <b>Resource Allocation Bot</b> - I help teams manage shared resources like servers, devices, and accounts.\n\n"
+    
+    text += "🚀 <b>Quick Start:</b>\n"
+    text += "• <code>/list</code> - See all available items\n"
+    text += "• <code>/take ItemName</code> - Take a free item\n"
+    text += "• <code>/free ItemName</code> - Release your item\n"
+    text += "• <code>/help</code> - Get detailed help & examples\n\n"
+    
+    text += "🔧 <b>All User Commands:</b>\n"
+    text += "• <code>/list</code> - List all items (with filters)\n"
+    text += "• <code>/take</code> - Take a free item\n"
+    text += "• <code>/free</code> - Free an item you own\n"
+    text += "• <code>/steal</code> - Steal an item (urgent situations)\n\n"
+    
     if is_moderator_or_admin(user_id, username):
-        text += "\nModerator commands:\n"
-        text += "/additem - Add a new item\n"
-        text += "/delitem - Delete an item\n"
-        text += "/assign - Assign item to user\n"
+        text += "🛡️ <b>Your Moderator Commands:</b>\n"
+        text += "• <code>/additem</code> - Add a new item\n"
+        text += "• <code>/delitem</code> - Delete an item\n"
+        text += "• <code>/assign</code> - Assign item to user\n"
+        text += "• <code>/help mod</code> - Moderator help guide\n\n"
     
     if is_admin(user_id):
-        text += "\nAdmin commands:\n"
-        text += "/addtype - Add a new item type\n"
-        text += "/listtypes - List all types\n"
-        text += "/deltype - Delete a type\n"
-        text += "/addmod - Add moderator\n"
-        text += "/delmod - Remove moderator\n"
-        text += "/listmod - List moderators\n"
+        text += "👑 <b>Your Admin Commands:</b>\n"
+        text += "• <code>/addtype</code> - Add item type\n"
+        text += "• <code>/listtypes</code> - List all types\n"
+        text += "• <code>/deltype</code> - Delete a type\n"
+        text += "• <code>/addmod</code> - Add moderator\n"
+        text += "• <code>/delmod</code> - Remove moderator\n"
+        text += "• <code>/listmod</code> - List moderators\n"
+        text += "• <code>/help admin</code> - Admin setup guide\n\n"
+    
+    text += "💡 <b>Pro Tips:</b>\n"
+    text += "• Always specify a purpose when taking items\n"
+    text += "• Free items promptly when you're done\n"
+    text += "• Use <code>/list owner yourusername</code> to see your items\n\n"
+    
+    text += "❓ Need help? Use <code>/help</code> for detailed examples!"
     
     await update.message.reply_html(text)
 
