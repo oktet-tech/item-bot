@@ -26,7 +26,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Configuration
-BOT_TOKEN = "7636903842:AAFriRggH2EjFBz267cpiLBMrhciUawpqeM"
+BOT_TOKEN = "your-bot-token-here"
 ADMIN_USER_IDS = [79700973]  # Replace with actual admin user IDs
 
 # Conversation states
@@ -80,6 +80,16 @@ class ResourceBot:
                 purpose TEXT,
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (item_id) REFERENCES items(id)
+            )
+        ''')
+        
+        # Create moderators table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS moderators (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                added_by TEXT,
+                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         
@@ -376,6 +386,52 @@ class ResourceBot:
         conn.commit()
         conn.close()
         return True, f"You have stolen '{item_name}' from {current_owner}"
+    
+    # Moderator management methods
+    def add_moderator(self, username: str, added_by: str) -> bool:
+        """Add a moderator"""
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO moderators (username, added_by) VALUES (?, ?)",
+                (username, added_by)
+            )
+            conn.commit()
+            conn.close()
+            return True
+        except sqlite3.IntegrityError:
+            return False
+    
+    def remove_moderator(self, username: str) -> bool:
+        """Remove a moderator"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM moderators WHERE username = ?", (username,))
+        success = cursor.rowcount > 0
+        conn.commit()
+        conn.close()
+        return success
+    
+    def list_moderators(self) -> List[Tuple[str, str, str]]:
+        """List all moderators"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT username, added_by, added_at FROM moderators ORDER BY added_at"
+        )
+        moderators = cursor.fetchall()
+        conn.close()
+        return moderators
+    
+    def is_moderator(self, username: str) -> bool:
+        """Check if user is a moderator"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1 FROM moderators WHERE username = ?", (username,))
+        result = cursor.fetchone()
+        conn.close()
+        return result is not None
 
 # Bot instance
 bot = ResourceBot()
@@ -384,6 +440,14 @@ bot = ResourceBot()
 def is_admin(user_id: int) -> bool:
     """Check if user is admin"""
     return user_id in ADMIN_USER_IDS
+
+def is_moderator_or_admin(user_id: int, username: str) -> bool:
+    """Check if user is moderator or admin"""
+    if is_admin(user_id):
+        return True
+    if username:
+        return bot.is_moderator(username)
+    return False
 
 def format_item_list(items: List[Dict]) -> str:
     """Format items list for display as HTML list"""
@@ -440,15 +504,23 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text += "/free - Free an item you own\n"
     text += "/steal - Steal an item from someone\n"
     
-    if is_admin(user.id):
-        text += "\nAdmin commands:\n"
+    user_id = user.id
+    username = user.username
+    
+    if is_moderator_or_admin(user_id, username):
+        text += "\nModerator commands:\n"
         text += "/additem - Add a new item\n"
-        text += "/edititem - Edit an item\n"
         text += "/delitem - Delete an item\n"
+        text += "/assign - Assign item to user\n"
+    
+    if is_admin(user_id):
+        text += "\nAdmin commands:\n"
         text += "/addtype - Add a new item type\n"
         text += "/listtypes - List all types\n"
         text += "/deltype - Delete a type\n"
-        text += "/assign - Assign item to user\n"
+        text += "/addmod - Add moderator\n"
+        text += "/delmod - Remove moderator\n"
+        text += "/listmod - List moderators\n"
     
     await update.message.reply_html(text)
 
@@ -492,15 +564,24 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text += "<code>/free &lt;item_id&gt;</code> - Free an item you own\n"
     text += "<code>/steal</code> - Steal an item from someone (use responsibly!)\n\n"
     
-    if is_admin(user.id):
+    user_id = user.id
+    username = user.username
+    
+    if is_moderator_or_admin(user_id, username):
+        text += "🛡️ <b>Moderator Commands:</b>\n"
+        text += "<code>/additem</code> - Add new item (format: name | group | type_id_or_name | description)\n"
+        text += "<code>/delitem &lt;item_id_or_name&gt;</code> - Delete an item\n"
+        text += "<code>/assign &lt;item_id_or_name&gt; &lt;username&gt;</code> - Force assign item to user\n\n"
+    
+    if is_admin(user_id):
         text += "👑 <b>Admin Commands:</b>\n"
         text += "<code>/addtype</code> - Add new item type (e.g., 'Server', 'Device')\n"
         text += "<code>/listtypes</code> - Show all available types\n"
         text += "<code>/deltype &lt;type_id&gt;</code> - Delete a type (if unused)\n\n"
         
-        text += "<code>/additem</code> - Add new item (format: name | group | type_id_or_name | description)\n"
-        text += "<code>/delitem &lt;item_id_or_name&gt;</code> - Delete an item\n"
-        text += "<code>/assign &lt;item_id_or_name&gt; &lt;username&gt;</code> - Force assign item to user\n\n"
+        text += "<code>/addmod &lt;username&gt;</code> - Add moderator\n"
+        text += "<code>/delmod &lt;username&gt;</code> - Remove moderator\n"
+        text += "<code>/listmod</code> - List all moderators\n\n"
     
     text += "💡 <b>Tips:</b>\n"
     text += "• Always provide a purpose when taking/stealing items\n"
@@ -560,7 +641,10 @@ async def list_items_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 # Admin command handlers
 async def add_item_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start adding a new item"""
-    if not is_admin(update.effective_user.id):
+    user_id = update.effective_user.id
+    username = update.effective_user.username
+    
+    if not is_moderator_or_admin(user_id, username):
         await update.message.reply_text("You don't have permission to use this command.")
         return ConversationHandler.END
     
@@ -683,7 +767,10 @@ async def delete_type_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def delete_item_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Delete an item"""
-    if not is_admin(update.effective_user.id):
+    user_id = update.effective_user.id
+    username = update.effective_user.username
+    
+    if not is_moderator_or_admin(user_id, username):
         await update.message.reply_text("You don't have permission to use this command.")
         return
     
@@ -865,8 +952,11 @@ async def steal_item_finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 async def assign_item_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Assign an item to a user (admin only)"""
-    if not is_admin(update.effective_user.id):
+    """Assign an item to a user (moderator/admin only)"""
+    user_id = update.effective_user.id
+    username = update.effective_user.username
+    
+    if not is_moderator_or_admin(user_id, username):
         await update.message.reply_text("You don't have permission to use this command.")
         return
     
@@ -885,6 +975,64 @@ async def assign_item_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     success, message = bot.assign_item(item_id, to_user, by_user)
     await update.message.reply_text(message)
+
+async def add_moderator_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Add a moderator (admin only)"""
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("You don't have permission to use this command.")
+        return
+    
+    if not context.args:
+        await update.message.reply_text("Usage: /addmod <username>")
+        return
+    
+    username = context.args[0].lstrip('@')  # Remove @ if present
+    added_by = update.effective_user.username or str(update.effective_user.id)
+    
+    success = bot.add_moderator(username, added_by)
+    
+    if success:
+        await update.message.reply_text(f"✅ @{username} has been added as a moderator.")
+    else:
+        await update.message.reply_text(f"❌ @{username} is already a moderator.")
+
+async def remove_moderator_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Remove a moderator (admin only)"""
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("You don't have permission to use this command.")
+        return
+    
+    if not context.args:
+        await update.message.reply_text("Usage: /delmod <username>")
+        return
+    
+    username = context.args[0].lstrip('@')  # Remove @ if present
+    success = bot.remove_moderator(username)
+    
+    if success:
+        await update.message.reply_text(f"✅ @{username} has been removed from moderators.")
+    else:
+        await update.message.reply_text(f"❌ @{username} was not a moderator.")
+
+async def list_moderators_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """List all moderators (admin only)"""
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("You don't have permission to use this command.")
+        return
+    
+    moderators = bot.list_moderators()
+    
+    if not moderators:
+        await update.message.reply_text("No moderators configured.")
+        return
+    
+    text = "<b>Moderators:</b>\n\n"
+    for username, added_by, added_at in moderators:
+        text += f"• @{username}\n"
+        text += f"  Added by: {added_by or 'N/A'}\n"
+        text += f"  Added: {added_at}\n\n"
+    
+    await update.message.reply_html(text)
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Cancel the current operation"""
@@ -943,6 +1091,9 @@ def main():
     application.add_handler(CommandHandler("free", free_item_command))
     application.add_handler(steal_item_handler)
     application.add_handler(CommandHandler("assign", assign_item_command))
+    application.add_handler(CommandHandler("addmod", add_moderator_command))
+    application.add_handler(CommandHandler("delmod", remove_moderator_command))
+    application.add_handler(CommandHandler("listmod", list_moderators_command))
     
     # Run the bot
     application.run_polling()
