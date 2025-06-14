@@ -671,65 +671,19 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     text = f"🤖 <b>Resource Allocation Bot Help</b>\n\n"
     
-    if help_type == 'mod' and is_moderator_or_admin(user_id, username):
-        # Moderator help
-        text += "🛡️ <b>Moderator Commands & Guide</b>\n\n"
-        text += "As a moderator, you can manage items and assignments:\n\n"
+    # Determine which sections to show
+    show_user = help_type in [None, 'full']
+    show_mod = help_type in ['mod', 'full'] and is_moderator_or_admin(user_id, username)
+    show_admin = help_type in ['admin', 'full'] and is_admin(user_id)
+    
+    if help_type == 'full':
+        text += "📚 <b>Complete Bot Help Guide</b>\n\n"
+    
+    # User section
+    if show_user:
+        if help_type == 'full':
+            text += "👤 <b>USER COMMANDS</b>\n\n"
         
-        text += "<b>Adding Items:</b>\n"
-        text += "<code>/additem</code> → Enter: <code>WebServer1 | production | Server | Main web server</code>\n"
-        text += "Format: <code>name | group | type_id_or_name | description</code>\n\n"
-        
-        text += "<b>Managing Items:</b>\n"
-        text += "<code>/delitem WebServer1</code> → Delete an item\n"
-        text += "<code>/assign iPhone15 alice</code> → Force assign item to user\n\n"
-        
-        text += "🛡️ <b>Moderator Commands:</b>\n"
-        text += "<code>/additem</code> - Add new item (interactive)\n"
-        text += "<code>/additem &lt;name&gt; &lt;group&gt; &lt;type&gt; &lt;description&gt;</code> - Add item with inline args\n"
-        text += "<code>/delitem &lt;item_id_or_name&gt;</code> - Delete an item\n"
-        text += "<code>/assign &lt;item_id_or_name&gt; &lt;username&gt;</code> - Force assign item to user\n\n"
-        
-        text += "<code>/addnotify [type_name]</code> - Enable notifications (all types if no arg)\n"
-        text += "<code>/delnotify [type_name]</code> - Disable notifications (all types if no arg)\n"
-        text += "<code>/listnotify</code> - List all notification subscriptions\n\n"
-        
-    elif help_type == 'admin' and is_admin(user_id):
-        # Admin help
-        text += "👑 <b>Admin Commands & Setup Guide</b>\n\n"
-        text += "As an admin, you can set up the entire system:\n\n"
-        
-        text += "<b>1. Set up item types:</b>\n"
-        text += "<code>/addtype</code> → Enter: <code>Server</code>\n"
-        text += "<code>/addtype</code> → Enter: <code>Test Device</code>\n\n"
-        
-        text += "<b>2. Manage moderators:</b>\n"
-        text += "<code>/addmod alice</code> → Add alice as moderator\n"
-        text += "<code>/listmod</code> → See all moderators\n"
-        text += "<code>/delmod bob</code> → Remove bob from moderators\n\n"
-        
-        text += "<b>3. Manage types:</b>\n"
-        text += "<code>/listtypes</code> → See all item types\n"
-        text += "<code>/deltype 1</code> → Delete unused type\n\n"
-        
-        text += "👑 <b>Admin Commands:</b>\n"
-        text += "<code>/addtype</code> - Add new item type (interactive)\n"
-        text += "<code>/addtype &lt;type_name&gt;</code> - Add type with inline arg\n"
-        text += "<code>/listtypes</code> - Show all available types\n"
-        text += "<code>/deltype &lt;type_id&gt;</code> - Delete a type (if unused)\n\n"
-        
-        text += "<code>/addmod &lt;username&gt;</code> - Add moderator\n"
-        text += "<code>/delmod &lt;username&gt;</code> - Remove moderator\n"
-        text += "<code>/listmod</code> - List all moderators\n"
-        text += "<code>/listhist [N]</code> - View latest N usage history entries (default: 10)\n\n"
-        
-        text += "🗄️ <b>Database Management:</b>\n"
-        text += "<code>/dbdump</code> - Export database as bot commands for backup/migration\n"
-        text += "<code>/batch</code> - Import and execute commands from file or direct text input\n"
-        text += "<code>/dbwipe confirm</code> - Reset database (deletes everything!)\n\n"
-        
-    else:
-        # Default user help
         text += "This bot helps manage shared resources (servers, devices, accounts, etc.) in your team.\n\n"
         
         text += "📋 <b>How to Use:</b>\n\n"
@@ -764,6 +718,73 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += "• Stealing should be used only for urgent situations\n"
         text += "• Check <code>/list owner yourusername</code> to see your items\n\n"
     
+    # Moderator section
+    if show_mod:
+        if help_type == 'full':
+            text += "🛡️ <b>MODERATOR COMMANDS</b>\n\n"
+        else:
+            text += "🛡️ <b>Moderator Commands & Guide</b>\n\n"
+        
+        text += "As a moderator, you can manage items and assignments:\n\n"
+        
+        text += "<b>Adding Items:</b>\n"
+        text += "<code>/additem</code> → Enter: <code>WebServer1 | production | Server | Main web server</code>\n"
+        text += "Format: <code>name | group | type_id_or_name | description</code>\n\n"
+        
+        text += "<b>Managing Items:</b>\n"
+        text += "<code>/delitem WebServer1</code> → Delete an item\n"
+        text += "<code>/assign iPhone15 alice</code> → Force assign item to user\n\n"
+        
+        text += "🛡️ <b>Moderator Commands:</b>\n"
+        text += "<code>/additem</code> - Add new item (interactive)\n"
+        text += "<code>/additem &lt;name&gt; &lt;group&gt; &lt;type&gt; &lt;description&gt;</code> - Add item with inline args\n"
+        text += "<code>/delitem &lt;item_id_or_name&gt;</code> - Delete an item\n"
+        text += "<code>/assign &lt;item_id_or_name&gt; &lt;username&gt;</code> - Force assign item to user\n\n"
+        
+        text += "<code>/addnotify [type_name]</code> - Enable notifications (all types if no arg)\n"
+        text += "<code>/delnotify [type_name]</code> - Disable notifications (all types if no arg)\n"
+        text += "<code>/listnotify</code> - List all notification subscriptions\n\n"
+    
+    # Admin section
+    if show_admin:
+        if help_type == 'full':
+            text += "👑 <b>ADMIN COMMANDS</b>\n\n"
+        else:
+            text += "👑 <b>Admin Commands & Setup Guide</b>\n\n"
+        
+        text += "As an admin, you can set up the entire system:\n\n"
+        
+        text += "<b>1. Set up item types:</b>\n"
+        text += "<code>/addtype</code> → Enter: <code>Server</code>\n"
+        text += "<code>/addtype</code> → Enter: <code>Test Device</code>\n\n"
+        
+        text += "<b>2. Manage moderators:</b>\n"
+        text += "<code>/addmod alice</code> → Add alice as moderator\n"
+        text += "<code>/listmod</code> → See all moderators\n"
+        text += "<code>/delmod bob</code> → Remove bob from moderators\n\n"
+        
+        text += "<b>3. Manage types:</b>\n"
+        text += "<code>/listtypes</code> → See all item types\n"
+        text += "<code>/deltype 1</code> → Delete unused type\n\n"
+        
+        text += "👑 <b>Admin Commands:</b>\n"
+        text += "<code>/addtype</code> - Add new item type (interactive)\n"
+        text += "<code>/addtype &lt;type_name&gt;</code> - Add type with inline arg\n"
+        text += "<code>/listtypes</code> - Show all available types\n"
+        text += "<code>/deltype &lt;type_id&gt;</code> - Delete a type (if unused)\n\n"
+        
+        text += "<code>/addmod &lt;username&gt;</code> - Add moderator\n"
+        text += "<code>/delmod &lt;username&gt;</code> - Remove moderator\n"
+        text += "<code>/listmod</code> - List all moderators\n"
+        text += "<code>/listhist [N]</code> - View latest N usage history entries (default: 10)\n\n"
+        
+        text += "🗄️ <b>Database Management:</b>\n"
+        text += "<code>/dbdump</code> - Export database as bot commands for backup/migration\n"
+        text += "<code>/batch</code> - Import and execute commands from file or direct text input\n"
+        text += "<code>/dbwipe confirm</code> - Reset database (deletes everything!)\n\n"
+    
+
+    
     # Add role-specific help hints
     if help_type != 'mod' and is_moderator_or_admin(user_id, username):
         text += "🛡️ <b>Moderator?</b> Use <code>/help mod</code> for moderator commands.\n"
@@ -771,8 +792,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if help_type != 'admin' and is_admin(user_id):
         text += "👑 <b>Admin?</b> Use <code>/help admin</code> for admin commands and setup guide.\n"
     
-    if help_type not in ['mod', 'admin']:
-        text += "\n❓ <b>Need help?</b> Contact an admin or use <code>/start</code> for quick command list."
+    if help_type not in ['mod', 'admin', 'full']:
+        text += "\n❓ <b>Need help?</b> Contact an admin or use <code>/start</code> for quick command list.\n"
+        text += "📖 Use <code>/help full</code> to see all available commands at once."
     
     await update.message.reply_html(text)
 
