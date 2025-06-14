@@ -527,70 +527,106 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Send detailed help with examples"""
     user = update.effective_user
-    
-    text = f"🤖 <b>Resource Allocation Bot Help</b>\n\n"
-    text += "This bot helps manage shared resources (servers, devices, accounts, etc.) in your team.\n\n"
-    
-    text += "📋 <b>Item Lifecycle Example:</b>\n\n"
-    text += "<b>1. Admin sets up item types:</b>\n"
-    text += "<code>/addtype</code> → Enter: <code>Server</code>\n"
-    text += "<code>/addtype</code> → Enter: <code>Test Device</code>\n\n"
-    
-    text += "<b>2. Admin adds items:</b>\n"
-    text += "<code>/additem</code> → Enter: <code>ItemName | production | 1 | Main web server</code>\n"
-    text += "<code>/additem</code> → Enter: <code>iPhone15 | testing | 2 | iOS testing device</code>\n\n"
-    
-    text += "<b>3. Users can see available items:</b>\n"
-    text += "<code>/list</code> → Shows all items with their status (free/owned)\n"
-    text += "<code>/list group production</code> → Shows only production items\n"
-    text += "<code>/list owner alice</code> → Shows items owned by alice\n\n"
-    
-    text += "<b>4. Taking a free item:</b>\n"
-    text += "<code>/take ItemName debugging issue</code> → Take with purpose immediately\n"
-    text += "<code>/take ItemName</code> → Bot asks for purpose\n"
-    text += "✅ Result: ItemName is now owned by you\n\n"
-    
-    text += "<b>5. Freeing your item:</b>\n"
-    text += "<code>/free 1</code> → Releases ItemName back to free pool\n"
-    text += "✅ Result: ItemName is now available for others\n\n"
-    
-    text += "<b>6. Stealing an item (when urgent):</b>\n"
-    text += "<code>/steal</code> → Shows owned items → Enter: <code>2 critical production bug</code>\n"
-    text += "⚠️ Result: You steal iPhone15 from current owner\n\n"
-    
-    text += "🔧 <b>User Commands:</b>\n"
-    text += "<code>/list</code> - List all items (add filters: group, type, owner)\n"
-    text += "<code>/take &lt;item_name&gt; [purpose]</code> - Take a free item\n"
-    text += "<code>/free &lt;item_id&gt;</code> - Free an item you own\n"
-    text += "<code>/steal</code> - Steal an item from someone (use responsibly!)\n\n"
-    
     user_id = user.id
     username = user.username
     
-    if is_moderator_or_admin(user_id, username):
+    # Check what type of help to show
+    help_type = None
+    if context.args:
+        help_type = context.args[0].lower()
+    
+    text = f"🤖 <b>Resource Allocation Bot Help</b>\n\n"
+    
+    if help_type == 'mod' and is_moderator_or_admin(user_id, username):
+        # Moderator help
+        text += "🛡️ <b>Moderator Commands & Guide</b>\n\n"
+        text += "As a moderator, you can manage items and assignments:\n\n"
+        
+        text += "<b>Adding Items:</b>\n"
+        text += "<code>/additem</code> → Enter: <code>WebServer1 | production | Server | Main web server</code>\n"
+        text += "Format: <code>name | group | type_id_or_name | description</code>\n\n"
+        
+        text += "<b>Managing Items:</b>\n"
+        text += "<code>/delitem WebServer1</code> → Delete an item\n"
+        text += "<code>/assign iPhone15 alice</code> → Force assign item to user\n\n"
+        
         text += "🛡️ <b>Moderator Commands:</b>\n"
-        text += "<code>/additem</code> - Add new item (format: name | group | type_id_or_name | description)\n"
+        text += "<code>/additem</code> - Add new item\n"
         text += "<code>/delitem &lt;item_id_or_name&gt;</code> - Delete an item\n"
         text += "<code>/assign &lt;item_id_or_name&gt; &lt;username&gt;</code> - Force assign item to user\n\n"
-    
-    if is_admin(user_id):
+        
+    elif help_type == 'admin' and is_admin(user_id):
+        # Admin help
+        text += "👑 <b>Admin Commands & Setup Guide</b>\n\n"
+        text += "As an admin, you can set up the entire system:\n\n"
+        
+        text += "<b>1. Set up item types:</b>\n"
+        text += "<code>/addtype</code> → Enter: <code>Server</code>\n"
+        text += "<code>/addtype</code> → Enter: <code>Test Device</code>\n\n"
+        
+        text += "<b>2. Manage moderators:</b>\n"
+        text += "<code>/addmod alice</code> → Add alice as moderator\n"
+        text += "<code>/listmod</code> → See all moderators\n"
+        text += "<code>/delmod bob</code> → Remove bob from moderators\n\n"
+        
+        text += "<b>3. Manage types:</b>\n"
+        text += "<code>/listtypes</code> → See all item types\n"
+        text += "<code>/deltype 1</code> → Delete unused type\n\n"
+        
         text += "👑 <b>Admin Commands:</b>\n"
-        text += "<code>/addtype</code> - Add new item type (e.g., 'Server', 'Device')\n"
+        text += "<code>/addtype</code> - Add new item type\n"
         text += "<code>/listtypes</code> - Show all available types\n"
         text += "<code>/deltype &lt;type_id&gt;</code> - Delete a type (if unused)\n\n"
         
         text += "<code>/addmod &lt;username&gt;</code> - Add moderator\n"
         text += "<code>/delmod &lt;username&gt;</code> - Remove moderator\n"
         text += "<code>/listmod</code> - List all moderators\n\n"
+        
+    else:
+        # Default user help
+        text += "This bot helps manage shared resources (servers, devices, accounts, etc.) in your team.\n\n"
+        
+        text += "📋 <b>How to Use:</b>\n\n"
+        text += "<b>1. See available items:</b>\n"
+        text += "<code>/list</code> → Shows all items with their status (🟢 free, 🔴 busy)\n"
+        text += "<code>/list group production</code> → Shows only production items\n"
+        text += "<code>/list owner alice</code> → Shows items owned by alice\n\n"
+        
+        text += "<b>2. Take a free item:</b>\n"
+        text += "<code>/take WebServer1 debugging issue</code> → Take with purpose immediately\n"
+        text += "<code>/take WebServer1</code> → Bot asks for purpose\n"
+        text += "✅ Result: WebServer1 is now owned by you\n\n"
+        
+        text += "<b>3. Free your item when done:</b>\n"
+        text += "<code>/free 1</code> → Releases WebServer1 back to free pool\n"
+        text += "✅ Result: WebServer1 is now available for others\n\n"
+        
+        text += "<b>4. Steal an item (urgent situations only):</b>\n"
+        text += "<code>/steal</code> → Shows owned items → Enter: <code>iPhone15 critical production bug</code>\n"
+        text += "⚠️ Result: You steal iPhone15 from current owner\n\n"
+        
+        text += "🔧 <b>User Commands:</b>\n"
+        text += "<code>/list</code> - List all items (add filters: group, type, owner)\n"
+        text += "<code>/take &lt;item_name&gt; [purpose]</code> - Take a free item\n"
+        text += "<code>/free &lt;item_id&gt;</code> - Free an item you own\n"
+        text += "<code>/steal</code> - Steal an item from someone (use responsibly!)\n\n"
+        
+        text += "💡 <b>Tips:</b>\n"
+        text += "• Always provide a purpose when taking/stealing items\n"
+        text += "• Free items promptly when done\n"
+        text += "• Use groups to organize items (production, testing, dev)\n"
+        text += "• Stealing should be used only for urgent situations\n"
+        text += "• Check <code>/list owner yourusername</code> to see your items\n\n"
     
-    text += "💡 <b>Tips:</b>\n"
-    text += "• Always provide a purpose when taking/stealing items\n"
-    text += "• Free items promptly when done\n"
-    text += "• Use groups to organize items (production, testing, dev)\n"
-    text += "• Stealing should be used only for urgent situations\n"
-    text += "• Check <code>/list owner yourusername</code> to see your items\n\n"
+    # Add role-specific help hints
+    if help_type != 'mod' and is_moderator_or_admin(user_id, username):
+        text += "🛡️ <b>Moderator?</b> Use <code>/help mod</code> for moderator commands.\n"
     
-    text += "❓ <b>Need help?</b> Contact an admin or use <code>/start</code> for quick command list."
+    if help_type != 'admin' and is_admin(user_id):
+        text += "👑 <b>Admin?</b> Use <code>/help admin</code> for admin commands and setup guide.\n"
+    
+    if help_type not in ['mod', 'admin']:
+        text += "\n❓ <b>Need help?</b> Contact an admin or use <code>/start</code> for quick command list."
     
     await update.message.reply_html(text)
 
