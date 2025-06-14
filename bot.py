@@ -648,6 +648,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += "• <code>/listmod</code> - List moderators\n"
         text += "• <code>/listhist</code> - View usage history\n"
         text += "• <code>/help admin</code> - Admin setup guide\n\n"
+        
+        text += "🗄️ <b>Database Management (Admin):</b>\n"
+        text += "• <code>/dbdump</code> - Export database as commands\n"
+        text += "• <code>/dbwipe</code> - Reset database (dangerous!)\n\n"
     
     text += "💡 <b>Pro Tips:</b>\n"
     text += "• Always specify a purpose when taking items\n"
@@ -685,7 +689,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += "<code>/assign iPhone15 alice</code> → Force assign item to user\n\n"
         
         text += "🛡️ <b>Moderator Commands:</b>\n"
-        text += "<code>/additem</code> - Add new item\n"
+        text += "<code>/additem</code> - Add new item (interactive)\n"
+        text += "<code>/additem &lt;name&gt; &lt;group&gt; &lt;type&gt; &lt;description&gt;</code> - Add item with inline args\n"
         text += "<code>/delitem &lt;item_id_or_name&gt;</code> - Delete an item\n"
         text += "<code>/assign &lt;item_id_or_name&gt; &lt;username&gt;</code> - Force assign item to user\n\n"
         
@@ -712,7 +717,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += "<code>/deltype 1</code> → Delete unused type\n\n"
         
         text += "👑 <b>Admin Commands:</b>\n"
-        text += "<code>/addtype</code> - Add new item type\n"
+        text += "<code>/addtype</code> - Add new item type (interactive)\n"
+        text += "<code>/addtype &lt;type_name&gt;</code> - Add type with inline arg\n"
         text += "<code>/listtypes</code> - Show all available types\n"
         text += "<code>/deltype &lt;type_id&gt;</code> - Delete a type (if unused)\n\n"
         
@@ -720,6 +726,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += "<code>/delmod &lt;username&gt;</code> - Remove moderator\n"
         text += "<code>/listmod</code> - List all moderators\n"
         text += "<code>/listhist [N]</code> - View latest N usage history entries (default: 10)\n\n"
+        
+        text += "🗄️ <b>Database Management:</b>\n"
+        text += "<code>/dbdump</code> - Export database as bot commands for backup/migration\n"
+        text += "<code>/dbwipe confirm</code> - Reset database (deletes everything!)\n\n"
         
     else:
         # Default user help
@@ -828,6 +838,44 @@ async def add_item_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("No types available. Please add types first using /addtype")
         return ConversationHandler.END
     
+    # Check if item details provided as arguments
+    if context.args and len(context.args) >= 4:
+        # Parse inline arguments: /additem name group type description
+        name = context.args[0]
+        group = context.args[1]
+        type_arg = context.args[2]
+        description = ' '.join(context.args[3:])
+        
+        # Try to parse type as integer first, then as string (type name)
+        type_id = None
+        
+        try:
+            # Try as integer (type ID)
+            type_id = int(type_arg)
+            if not any(t[0] == type_id for t in types):
+                await update.message.reply_text(f"Invalid type ID: {type_id}")
+                return ConversationHandler.END
+        except ValueError:
+            # Try as string (type name)
+            type_name_lower = type_arg.lower()
+            for t_id, t_name in types:
+                if t_name.lower() == type_name_lower:
+                    type_id = t_id
+                    break
+            
+            if type_id is None:
+                await update.message.reply_text(f"Invalid type name: '{type_arg}'. Use type ID or exact type name.")
+                return ConversationHandler.END
+        
+        success = bot.add_item(name, group, type_id, description)
+        
+        if success:
+            await update.message.reply_text(f"Item '{name}' added successfully!")
+        else:
+            await update.message.reply_text("Failed to add item. Name might already exist.")
+        
+        return ConversationHandler.END
+    
     # Store types in context for later use
     context.user_data['types'] = types
     
@@ -889,6 +937,18 @@ async def add_type_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start adding a new type"""
     if not is_admin(update.effective_user.id):
         await update.message.reply_text("You don't have permission to use this command.")
+        return ConversationHandler.END
+    
+    # Check if type name provided as argument
+    if context.args:
+        type_name = ' '.join(context.args).strip()
+        success = bot.add_type(type_name)
+        
+        if success:
+            await update.message.reply_text(f"Type '{type_name}' added successfully!")
+        else:
+            await update.message.reply_text("Failed to add type. Name might already exist.")
+        
         return ConversationHandler.END
     
     await update.message.reply_text("Please enter the name for the new type:")
@@ -1486,6 +1546,143 @@ async def list_history_command(update: Update, context: ContextTypes.DEFAULT_TYP
     
     await update.message.reply_html(text)
 
+async def wipe_database_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Wipe and bootstrap the database (admin only)"""
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("You don't have permission to use this command.")
+        return
+    
+    admin_user = update.effective_user.username or str(update.effective_user.id)
+    
+    # Confirmation check
+    if not context.args or context.args[0].lower() != 'confirm':
+        await update.message.reply_html(
+            "⚠️ <b>WARNING:</b> This will delete ALL data!\n\n"
+            "This includes:\n"
+            "• All item types\n"
+            "• All items\n"
+            "• All usage history\n"
+            "• All moderators\n"
+            "• All notification subscriptions\n\n"
+            "To confirm, use: <code>/dbwipe confirm</code>"
+        )
+        return
+    
+    try:
+        # Drop all tables and recreate
+        conn = bot.get_connection()
+        cursor = conn.cursor()
+        
+        # Drop tables in reverse dependency order
+        cursor.execute("DROP TABLE IF EXISTS notifications")
+        cursor.execute("DROP TABLE IF EXISTS usage_history")
+        cursor.execute("DROP TABLE IF EXISTS moderators")
+        cursor.execute("DROP TABLE IF EXISTS items")
+        cursor.execute("DROP TABLE IF EXISTS types")
+        
+        conn.commit()
+        conn.close()
+        
+        # Reinitialize database
+        bot.init_database()
+        
+        logger.warning(f"Database wiped by admin {admin_user}")
+        await update.message.reply_text("✅ Database wiped and reinitialized successfully!")
+        
+    except Exception as e:
+        logger.error(f"Failed to wipe database: {e}")
+        await update.message.reply_text(f"❌ Failed to wipe database: {str(e)}")
+
+async def dump_database_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Dump database as bot commands (admin only)"""
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("You don't have permission to use this command.")
+        return
+    
+    admin_user = update.effective_user.username or str(update.effective_user.id)
+    logger.info(f"Admin {admin_user} requested database dump")
+    
+    try:
+        conn = bot.get_connection()
+        cursor = conn.cursor()
+        
+        dump_lines = []
+        dump_lines.append("# Database dump - Bot commands to recreate data")
+        dump_lines.append("# Generated by /dbdump command")
+        dump_lines.append("")
+        
+        # Dump types
+        cursor.execute("SELECT id, name FROM types ORDER BY id")
+        types = cursor.fetchall()
+        
+        if types:
+            dump_lines.append("# Item Types")
+            for type_id, type_name in types:
+                dump_lines.append(f"/addtype {type_name}")
+            dump_lines.append("")
+        
+        # Dump items
+        cursor.execute('''
+            SELECT i.name, i.group_name, t.name as type_name, i.description
+            FROM items i
+            LEFT JOIN types t ON i.type_id = t.id
+            ORDER BY i.id
+        ''')
+        items = cursor.fetchall()
+        
+        if items:
+            dump_lines.append("# Items")
+            for item_name, group_name, type_name, description in items:
+                # Escape any special characters and format for inline command
+                safe_name = item_name.replace(' ', '_') if ' ' in item_name else item_name
+                safe_group = group_name.replace(' ', '_') if ' ' in group_name else group_name
+                safe_type = type_name.replace(' ', '_') if type_name and ' ' in type_name else type_name
+                safe_desc = description.replace('\n', ' ').replace('|', '-') if description else 'No description'
+                
+                dump_lines.append(f"/additem {safe_name} {safe_group} {safe_type or 'Unknown'} {safe_desc}")
+            dump_lines.append("")
+        
+        # Dump moderators
+        cursor.execute("SELECT username FROM moderators ORDER BY added_at")
+        moderators = cursor.fetchall()
+        
+        if moderators:
+            dump_lines.append("# Moderators")
+            for (username,) in moderators:
+                dump_lines.append(f"/addmod {username}")
+            dump_lines.append("")
+        
+        conn.close()
+        
+        if len(dump_lines) <= 3:  # Only headers
+            await update.message.reply_text("No data to dump - database is empty.")
+            return
+        
+        # Create dump text
+        dump_text = '\n'.join(dump_lines)
+        
+        # Send as file if too long, otherwise as message
+        if len(dump_text) > 4000:
+            # Create a file
+            import io
+            file_content = dump_text.encode('utf-8')
+            file_obj = io.BytesIO(file_content)
+            file_obj.name = 'database_dump.txt'
+            
+            await update.message.reply_document(
+                document=file_obj,
+                filename='database_dump.txt',
+                caption='📄 Database dump as bot commands'
+            )
+        else:
+            await update.message.reply_text(f"```\n{dump_text}\n```", parse_mode='MarkdownV2')
+        
+        logger.info(f"Database dump completed for admin {admin_user}")
+        
+    except Exception as e:
+        logger.error(f"Failed to dump database: {e}")
+        await update.message.reply_text(f"❌ Failed to dump database: {str(e)}")
+
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Cancel the current operation"""
     await update.message.reply_text("Operation cancelled.")
@@ -1550,6 +1747,8 @@ def main():
     application.add_handler(CommandHandler("delnotify", remove_notify_command))
     application.add_handler(CommandHandler("listnotify", list_notify_command))
     application.add_handler(CommandHandler("listhist", list_history_command))
+    application.add_handler(CommandHandler("dbwipe", wipe_database_command))
+    application.add_handler(CommandHandler("dbdump", dump_database_command))
     
     # Run the bot
     application.run_polling()
