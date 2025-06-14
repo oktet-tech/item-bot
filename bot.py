@@ -30,12 +30,7 @@ BOT_TOKEN = "your-bot-token-here"
 ADMIN_USER_IDS = [79700973]  # Replace with actual admin user IDs
 
 # Conversation states
-ADDING_ITEM = range(1)
-EDITING_ITEM = range(1)
-ADDING_TYPE = range(1)
-TAKING_ITEM = range(1)
-TAKING_PURPOSE = range(1)
-STEALING_ITEM = range(1)
+ADDING_ITEM, EDITING_ITEM, ADDING_TYPE, TAKING_ITEM, TAKING_PURPOSE, STEALING_ITEM, BATCH_PROCESSING, BATCH_CONFIRMING = range(8)
 
 class ResourceBot:
     def __init__(self, db_path: str = "resources.db"):
@@ -651,6 +646,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         text += "🗄️ <b>Database Management (Admin):</b>\n"
         text += "• <code>/dbdump</code> - Export database as commands\n"
+        text += "• <code>/batch</code> - Import commands from file or chat\n"
         text += "• <code>/dbwipe</code> - Reset database (dangerous!)\n\n"
     
     text += "💡 <b>Pro Tips:</b>\n"
@@ -729,6 +725,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         text += "🗄️ <b>Database Management:</b>\n"
         text += "<code>/dbdump</code> - Export database as bot commands for backup/migration\n"
+        text += "<code>/batch</code> - Import and execute commands from file or direct text input\n"
         text += "<code>/dbwipe confirm</code> - Reset database (deletes everything!)\n\n"
         
     else:
@@ -1546,6 +1543,208 @@ async def list_history_command(update: Update, context: ContextTypes.DEFAULT_TYP
     
     await update.message.reply_html(text)
 
+async def batch_command_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Start batch command processing (admin only)"""
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("You don't have permission to use this command.")
+        return ConversationHandler.END
+    
+    await update.message.reply_html(
+        "📄 <b>Batch Command Processing</b>\n\n"
+        "You can provide commands in two ways:\n\n"
+        "📎 <b>Option 1:</b> Upload a text file containing bot commands\n"
+        "💬 <b>Option 2:</b> Paste commands directly in chat\n\n"
+        "• Lines starting with <code>#</code> will be ignored\n"
+        "• Empty lines will be skipped\n"
+        "• Commands will be executed in order\n"
+        "• Process will stop on first error\n\n"
+        "Send the file or paste commands now, or use /cancel to abort."
+    )
+    return BATCH_PROCESSING
+
+async def batch_command_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Process uploaded batch file or text input"""
+    admin_user = update.effective_user.username or str(update.effective_user.id)
+    content = None
+    
+    try:
+        if update.message.document:
+            # Handle file upload
+            file = await context.bot.get_file(update.message.document.file_id)
+            file_content = await file.download_as_bytearray()
+            
+            # Decode content
+            try:
+                content = file_content.decode('utf-8')
+            except UnicodeDecodeError:
+                await update.message.reply_text("❌ File must be a text file with UTF-8 encoding.")
+                return ConversationHandler.END
+                
+        elif update.message.text:
+            # Handle direct text input
+            content = update.message.text.strip()
+            
+        else:
+            await update.message.reply_text("Please upload a text file or paste commands directly, or use /cancel to abort.")
+            return BATCH_PROCESSING
+        
+        # Parse commands
+        lines = content.split('\n')
+        commands = []
+        
+        for line_num, line in enumerate(lines, 1):
+            line = line.strip()
+            # Skip empty lines and comments
+            if not line or line.startswith('#'):
+                continue
+            
+            # Validate it looks like a bot command
+            if not line.startswith('/'):
+                await update.message.reply_text(f"❌ Invalid command on line {line_num}: {line[:50]}...")
+                return ConversationHandler.END
+            
+            commands.append((line_num, line))
+        
+        if not commands:
+            await update.message.reply_text("❌ No valid commands found in file.")
+            return ConversationHandler.END
+        
+        # Show preview and ask for confirmation
+        preview_lines = []
+        for i, (line_num, cmd) in enumerate(commands[:10]):  # Show first 10
+            preview_lines.append(f"{i+1}. {cmd}")
+        
+        preview_text = '\n'.join(preview_lines)
+        if len(commands) > 10:
+            preview_text += f"\n... and {len(commands) - 10} more commands"
+        
+        await update.message.reply_html(
+            f"📋 <b>Found {len(commands)} commands to execute:</b>\n\n"
+            f"<code>{preview_text}</code>\n\n"
+            "⚠️ <b>Warning:</b> This will execute all commands immediately!\n\n"
+            "Reply with <code>EXECUTE</code> to proceed, or anything else to cancel."
+        )
+        
+        # Store commands in context for confirmation
+        context.user_data['batch_commands'] = commands
+        return BATCH_CONFIRMING
+        
+    except Exception as e:
+        logger.error(f"Failed to process batch file: {e}")
+        await update.message.reply_text(f"❌ Failed to process file: {str(e)}")
+        return ConversationHandler.END
+
+async def batch_command_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Execute confirmed batch commands"""
+    if update.message.text.strip().upper() != 'EXECUTE':
+        await update.message.reply_text("❌ Batch processing cancelled.")
+        return ConversationHandler.END
+    
+    commands = context.user_data.get('batch_commands', [])
+    if not commands:
+        await update.message.reply_text("❌ No commands to execute.")
+        return ConversationHandler.END
+    
+    admin_user = update.effective_user.username or str(update.effective_user.id)
+    logger.warning(f"Admin {admin_user} starting batch execution of {len(commands)} commands")
+    
+    await update.message.reply_text(f"🔄 Executing {len(commands)} commands...")
+    
+    executed = 0
+    failed = 0
+    results = []
+    
+    for line_num, command in commands:
+        try:
+            # Parse command and arguments
+            parts = command.split()
+            cmd = parts[0][1:]  # Remove leading /
+            args = parts[1:] if len(parts) > 1 else []
+            
+            # Execute based on command type
+            success = False
+            message = ""
+            
+            if cmd == 'addtype' and len(args) >= 1:
+                type_name = ' '.join(args)
+                success = bot.add_type(type_name)
+                message = f"Type '{type_name}' {'added' if success else 'failed (may already exist)'}"
+                
+            elif cmd == 'additem' and len(args) >= 4:
+                name, group, type_arg, *desc_parts = args
+                description = ' '.join(desc_parts)
+                
+                # Find type ID
+                types = bot.list_types()
+                type_id = None
+                
+                try:
+                    type_id = int(type_arg)
+                    if not any(t[0] == type_id for t in types):
+                        type_id = None
+                except ValueError:
+                    type_name_lower = type_arg.lower()
+                    for t_id, t_name in types:
+                        if t_name.lower() == type_name_lower:
+                            type_id = t_id
+                            break
+                
+                if type_id:
+                    success = bot.add_item(name, group, type_id, description)
+                    message = f"Item '{name}' {'added' if success else 'failed (may already exist)'}"
+                else:
+                    message = f"Invalid type '{type_arg}' for item '{name}'"
+                    
+            elif cmd == 'addmod' and len(args) >= 1:
+                username = args[0]
+                success = bot.add_moderator(username, admin_user)
+                message = f"Moderator '{username}' {'added' if success else 'failed (may already exist)'}"
+                
+            else:
+                message = f"Unsupported or invalid command: {command}"
+            
+            if success or 'failed' not in message.lower():
+                executed += 1
+                results.append(f"✅ Line {line_num}: {message}")
+            else:
+                failed += 1
+                results.append(f"❌ Line {line_num}: {message}")
+                
+        except Exception as e:
+            failed += 1
+            results.append(f"❌ Line {line_num}: Error executing '{command}': {str(e)}")
+            logger.error(f"Batch command error on line {line_num}: {e}")
+    
+    # Send results
+    summary = f"📊 <b>Batch Execution Complete</b>\n\n"
+    summary += f"✅ Executed: {executed}\n"
+    summary += f"❌ Failed: {failed}\n"
+    summary += f"📋 Total: {len(commands)}\n\n"
+    
+    # Send summary first
+    await update.message.reply_html(summary)
+    
+    # Send detailed results if not too long
+    if results:
+        results_text = '\n'.join(results)
+        if len(results_text) > 4000:
+            # Send as file if too long
+            import io
+            file_content = results_text.encode('utf-8')
+            file_obj = io.BytesIO(file_content)
+            file_obj.name = 'batch_results.txt'
+            
+            await update.message.reply_document(
+                document=file_obj,
+                filename='batch_results.txt',
+                caption='📄 Detailed batch execution results'
+            )
+        else:
+            await update.message.reply_html(f"<b>Detailed Results:</b>\n\n<code>{results_text}</code>")
+    
+    logger.warning(f"Admin {admin_user} completed batch execution: {executed} success, {failed} failed")
+    return ConversationHandler.END
+
 async def wipe_database_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Wipe and bootstrap the database (admin only)"""
     if not is_admin(update.effective_user.id):
@@ -1727,6 +1926,18 @@ def main():
         fallbacks=[CommandHandler("cancel", cancel)],
     )
     
+    batch_handler = ConversationHandler(
+        entry_points=[CommandHandler("batch", batch_command_start)],
+        states={
+            BATCH_PROCESSING: [
+                MessageHandler(filters.Document.ALL, batch_command_process),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, batch_command_process)
+            ],
+            BATCH_CONFIRMING: [MessageHandler(filters.TEXT & ~filters.COMMAND, batch_command_execute)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+    
     # Register handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
@@ -1749,6 +1960,7 @@ def main():
     application.add_handler(CommandHandler("listhist", list_history_command))
     application.add_handler(CommandHandler("dbwipe", wipe_database_command))
     application.add_handler(CommandHandler("dbdump", dump_database_command))
+    application.add_handler(batch_handler)
     
     # Run the bot
     application.run_polling()
