@@ -49,6 +49,17 @@ in teams. Built with Python and the python-telegram-bot library.
 - Poetry (for dependency management)
 - A Telegram Bot Token (from @BotFather)
 
+### Bot creation
+
+Create a new bot in Telegram:
+
+- https://t.me/BotFather
+- `/newbot`
+- pick a name, say `companyprojectbot`
+
+Now you have a bot token, something long.
+You'll need it later.
+
 ### Setup
 
 1. **Clone the repository**
