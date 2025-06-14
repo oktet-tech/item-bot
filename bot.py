@@ -93,6 +93,20 @@ class ResourceBot:
             )
         ''')
         
+        # Create notifications table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS notifications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id INTEGER NOT NULL,
+                chat_title TEXT,
+                type_id INTEGER,
+                added_by TEXT,
+                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (type_id) REFERENCES types(id),
+                UNIQUE(chat_id, type_id)
+            )
+        ''')
+        
         # Add purpose column if it doesn't exist (migration for existing databases)
         try:
             cursor.execute("ALTER TABLE items ADD COLUMN purpose TEXT")
@@ -209,7 +223,7 @@ class ResourceBot:
         cursor = conn.cursor()
         
         query = '''
-            SELECT i.id, i.name, i.group_name, t.name as type_name, 
+            SELECT i.id, i.name, i.group_name, i.type_id, t.name as type_name, 
                    i.owner, i.purpose, i.description
             FROM items i
             LEFT JOIN types t ON i.type_id = t.id
@@ -432,9 +446,109 @@ class ResourceBot:
         result = cursor.fetchone()
         conn.close()
         return result is not None
+    
+    # Notification management methods
+    def add_notification(self, chat_id: int, chat_title: str, type_id: Optional[int], added_by: str) -> bool:
+        """Add a notification subscription"""
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO notifications (chat_id, chat_title, type_id, added_by) VALUES (?, ?, ?, ?)",
+                (chat_id, chat_title, type_id, added_by)
+            )
+            conn.commit()
+            conn.close()
+            return True
+        except sqlite3.IntegrityError:
+            return False
+    
+    def remove_notification(self, chat_id: int, type_id: Optional[int] = None) -> int:
+        """Remove notification subscription(s). Returns number of removed records"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        if type_id is None:
+            # Remove all notifications for this chat
+            cursor.execute("DELETE FROM notifications WHERE chat_id = ?", (chat_id,))
+        else:
+            # Remove specific type notification for this chat
+            cursor.execute("DELETE FROM notifications WHERE chat_id = ? AND type_id = ?", (chat_id, type_id))
+        
+        removed_count = cursor.rowcount
+        conn.commit()
+        conn.close()
+        return removed_count
+    
+    def list_notifications(self) -> List[Tuple[int, str, Optional[int], Optional[str], str, str]]:
+        """List all notification subscriptions"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT n.chat_id, n.chat_title, n.type_id, t.name as type_name, n.added_by, n.added_at
+            FROM notifications n
+            LEFT JOIN types t ON n.type_id = t.id
+            ORDER BY n.chat_title, t.name
+        ''')
+        notifications = cursor.fetchall()
+        conn.close()
+        return notifications
+    
+    def get_notification_chats_for_type(self, type_id: int) -> List[Tuple[int, str]]:
+        """Get all chats that should be notified for a specific item type"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT DISTINCT chat_id, chat_title 
+            FROM notifications 
+            WHERE type_id = ? OR type_id IS NULL
+        ''', (type_id,))
+        chats = cursor.fetchall()
+        conn.close()
+        return chats
 
 # Bot instance
 bot = ResourceBot()
+
+# Notification functions
+async def send_notification_to_chats(application, chats: List[Tuple[int, str]], message: str):
+    """Send notification message to multiple chats"""
+    for chat_id, chat_title in chats:
+        try:
+            await application.bot.send_message(
+                chat_id=chat_id,
+                text=message,
+                parse_mode='HTML'
+            )
+            logger.info(f"Sent notification to '{chat_title}' ({chat_id})")
+        except Exception as e:
+            logger.error(f"Failed to send notification to '{chat_title}' ({chat_id}): {e}")
+
+async def notify_item_action(application, item_name: str, item_type_id: int, action: str, user: str, purpose: str = None, from_user: str = None):
+    """Send notification when an item action occurs"""
+    chats = bot.get_notification_chats_for_type(item_type_id)
+    if not chats:
+        return
+    
+    # Create appropriate message based on action
+    if action == 'take':
+        emoji = '📍'
+        purpose_text = f" for <i>{purpose}</i>" if purpose else ""
+        message = f"{emoji} <b>{item_name}</b> taken by {user}{purpose_text}"
+    elif action == 'free':
+        emoji = '✅'
+        message = f"{emoji} <b>{item_name}</b> freed by {user}"
+    elif action == 'steal':
+        emoji = '⚠️'
+        purpose_text = f" for <i>{purpose}</i>" if purpose else ""
+        message = f"{emoji} <b>{item_name}</b> stolen by {user} from @{from_user}{purpose_text}"
+    elif action == 'assign':
+        emoji = '👑'
+        message = f"{emoji} <b>{item_name}</b> assigned to @{purpose} by @{user}"  # purpose contains target user for assign
+    else:
+        return
+    
+    await send_notification_to_chats(application, chats, message)
 
 # Helper functions
 def is_admin(user_id: int) -> bool:
@@ -519,6 +633,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += "• <code>/additem</code> - Add a new item\n"
         text += "• <code>/delitem</code> - Delete an item\n"
         text += "• <code>/assign</code> - Assign item to user\n"
+        text += "• <code>/addnotify</code> - Enable notifications\n"
+        text += "• <code>/delnotify</code> - Disable notifications\n"
+        text += "• <code>/listnotify</code> - List notifications\n"
         text += "• <code>/help mod</code> - Moderator help guide\n\n"
     
     if is_admin(user_id):
@@ -571,6 +688,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += "<code>/delitem &lt;item_id_or_name&gt;</code> - Delete an item\n"
         text += "<code>/assign &lt;item_id_or_name&gt; &lt;username&gt;</code> - Force assign item to user\n\n"
         
+        text += "<code>/addnotify [type_name]</code> - Enable notifications (all types if no arg)\n"
+        text += "<code>/delnotify [type_name]</code> - Disable notifications (all types if no arg)\n"
+        text += "<code>/listnotify</code> - List all notification subscriptions\n\n"
+        
     elif help_type == 'admin' and is_admin(user_id):
         # Admin help
         text += "👑 <b>Admin Commands & Setup Guide</b>\n\n"
@@ -614,7 +735,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += "✅ Result: WebServer1 is now owned by you\n\n"
         
         text += "<b>3. Free your item when done:</b>\n"
-        text += "<code>/free 1</code> → Releases WebServer1 back to free pool\n"
+        text += "<code>/free WebServer1</code> → Releases WebServer1 back to free pool\n"
         text += "✅ Result: WebServer1 is now available for others\n\n"
         
         text += "<b>4. Steal an item (urgent situations only):</b>\n"
@@ -878,6 +999,11 @@ async def take_item_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = update.effective_user.username or str(update.effective_user.id)
         success, message = bot.take_item(item_id, user, purpose)
         await update.message.reply_text(message)
+        
+        # Send notifications
+        if success:
+            await notify_item_action(context.application, item['name'], item['type_id'], 'take', user, purpose)
+        
         return ConversationHandler.END
     
     # If no purpose, ask for it
@@ -899,6 +1025,14 @@ async def take_purpose_finish(update: Update, context: ContextTypes.DEFAULT_TYPE
     user = update.effective_user.username or str(update.effective_user.id)
     success, message = bot.take_item(item_id, user, purpose)
     await update.message.reply_text(message)
+    
+    # Send notifications
+    if success:
+        # Get item details for notification
+        items = bot.list_items()
+        item = next((i for i in items if i['id'] == item_id), None)
+        if item:
+            await notify_item_action(context.application, item['name'], item['type_id'], 'take', user, purpose)
     
     # Clean up context data
     context.user_data.pop('take_item_id', None)
@@ -939,6 +1073,14 @@ async def take_item_finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
     success, message = bot.take_item(item_id, user, purpose)
     await update.message.reply_text(message)
     
+    # Send notifications
+    if success:
+        # Get item details for notification
+        items = bot.list_items()
+        item = next((i for i in items if i['id'] == item_id), None)
+        if item:
+            await notify_item_action(context.application, item['name'], item['type_id'], 'take', user, purpose)
+    
     return ConversationHandler.END
 
 async def free_item_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -964,6 +1106,14 @@ async def free_item_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     success, message = bot.free_item(item_id, user)
     await update.message.reply_text(message)
+    
+    # Send notifications
+    if success:
+        # Get item details for notification
+        items = bot.list_items()
+        item = next((i for i in items if i['id'] == item_id), None)
+        if item:
+            await notify_item_action(context.application, item['name'], item['type_id'], 'free', user)
 
 async def steal_item_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start stealing an item"""
@@ -998,8 +1148,17 @@ async def steal_item_finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
     purpose = parts[1] if len(parts) > 1 else None
     user = update.effective_user.username or str(update.effective_user.id)
     
+    # Get item details before stealing for notification
+    items = bot.list_items()
+    item = next((i for i in items if i['id'] == item_id), None)
+    previous_owner = item['owner'] if item else None
+    
     success, message = bot.steal_item(item_id, user, purpose)
     await update.message.reply_text(message)
+    
+    # Send notifications
+    if success and item and previous_owner:
+        await notify_item_action(context.application, item['name'], item['type_id'], 'steal', user, purpose, previous_owner)
     
     return ConversationHandler.END
 
@@ -1027,6 +1186,14 @@ async def assign_item_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     success, message = bot.assign_item(item_id, to_user, by_user)
     await update.message.reply_text(message)
+    
+    # Send notifications
+    if success:
+        # Get item details for notification
+        items = bot.list_items()
+        item = next((i for i in items if i['id'] == item_id), None)
+        if item:
+            await notify_item_action(context.application, item['name'], item['type_id'], 'assign', by_user, to_user)
 
 async def add_moderator_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Add a moderator (admin only)"""
@@ -1083,6 +1250,154 @@ async def list_moderators_command(update: Update, context: ContextTypes.DEFAULT_
         text += f"• @{username}\n"
         text += f"  Added by: {added_by or 'N/A'}\n"
         text += f"  Added: {added_at}\n\n"
+    
+    await update.message.reply_html(text)
+
+async def add_notify_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Add notification subscription (moderator/admin only)"""
+    user_id = update.effective_user.id
+    username = update.effective_user.username
+    
+    if not is_moderator_or_admin(user_id, username):
+        await update.message.reply_text("You don't have permission to use this command.")
+        return
+    
+    chat_id = update.effective_chat.id
+    chat_title = getattr(update.effective_chat, 'title', 'Private Chat')
+    added_by = username or str(user_id)
+    
+    # Parse type argument
+    type_id = None
+    type_name = None
+    
+    if context.args:
+        type_arg = context.args[0]
+        # Try to find type by name or ID
+        types = bot.list_types()
+        
+        # Try as integer first (type ID)
+        try:
+            type_id = int(type_arg)
+            type_name = next((t[1] for t in types if t[0] == type_id), None)
+            if not type_name:
+                await update.message.reply_text(f"Type ID {type_id} not found.")
+                return
+        except ValueError:
+            # Try as string (type name)
+            for t_id, t_name in types:
+                if t_name.lower() == type_arg.lower():
+                    type_id = t_id
+                    type_name = t_name
+                    break
+            
+            if type_id is None:
+                await update.message.reply_text(f"Type '{type_arg}' not found.")
+                return
+    
+    success = bot.add_notification(chat_id, chat_title, type_id, added_by)
+    
+    if success:
+        if type_id:
+            await update.message.reply_html(f'✅ Notifications enabled for <b>{type_name}</b> items in this chat.')
+        else:
+            await update.message.reply_html('✅ Notifications enabled for <b>all item types</b> in this chat.')
+    else:
+        if type_id:
+            await update.message.reply_html(f'❌ Notifications for <b>{type_name}</b> are already enabled in this chat.')
+        else:
+            await update.message.reply_html('❌ Notifications for <b>all item types</b> are already enabled in this chat.')
+
+async def remove_notify_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Remove notification subscription (moderator/admin only)"""
+    user_id = update.effective_user.id
+    username = update.effective_user.username
+    
+    if not is_moderator_or_admin(user_id, username):
+        await update.message.reply_text("You don't have permission to use this command.")
+        return
+    
+    chat_id = update.effective_chat.id
+    
+    # Parse type argument
+    type_id = None
+    type_name = None
+    
+    if context.args:
+        type_arg = context.args[0]
+        # Try to find type by name or ID
+        types = bot.list_types()
+        
+        # Try as integer first (type ID)
+        try:
+            type_id = int(type_arg)
+            type_name = next((t[1] for t in types if t[0] == type_id), None)
+            if not type_name:
+                await update.message.reply_text(f"Type ID {type_id} not found.")
+                return
+        except ValueError:
+            # Try as string (type name)
+            for t_id, t_name in types:
+                if t_name.lower() == type_arg.lower():
+                    type_id = t_id
+                    type_name = t_name
+                    break
+            
+            if type_id is None:
+                await update.message.reply_text(f"Type '{type_arg}' not found.")
+                return
+    
+    removed_count = bot.remove_notification(chat_id, type_id)
+    
+    if removed_count > 0:
+        if type_id:
+            await update.message.reply_text(f"✅ Notifications for <b>{type_name}</b> removed from this chat.")
+        else:
+            await update.message.reply_text(f"✅ Removed {removed_count} notification subscription(s) from this chat.")
+    else:
+        if type_id:
+            await update.message.reply_text(f"❌ No notifications for <b>{type_name}</b> found in this chat.")
+        else:
+            await update.message.reply_text("❌ No notification subscriptions found in this chat.")
+
+async def list_notify_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """List all notification subscriptions (moderator/admin only)"""
+    user_id = update.effective_user.id
+    username = update.effective_user.username
+    
+    if not is_moderator_or_admin(user_id, username):
+        await update.message.reply_text("You don't have permission to use this command.")
+        return
+    
+    notifications = bot.list_notifications()
+    
+    # Log the notification listing
+    logger.info(f"User {username or user_id} requested notification list")
+    
+    if not notifications:
+        logger.info("No notification subscriptions configured")
+        await update.message.reply_text("No notification subscriptions configured.")
+        return
+    
+    # Log each notification's details
+    logger.info(f"Found {len(notifications)} notification subscriptions:")
+    for chat_id, chat_title, type_id, type_name, added_by, added_at in notifications:
+        logger.info(f"  - Chat: '{chat_title}' (ID: {chat_id}), Type: {type_name or 'ALL'}, Added by: {added_by}, Added: {added_at}")
+    
+    text = "<b>📢 Notification Subscriptions:</b>\n\n"
+    
+    # Group by chat for better readability
+    current_chat = None
+    for chat_id, chat_title, type_id, type_name, added_by, added_at in notifications:
+        if current_chat != chat_title:
+            if current_chat is not None:
+                text += "\n"
+            text += f"<b>💬 {chat_title or 'Unknown Chat'}</b>\n"
+            text += f"   ID: <code>{chat_id}</code>\n"
+            current_chat = chat_title
+        
+        type_display = type_name or "ALL TYPES"
+        text += f"   • {type_display}\n"
+        text += f"     Added by: {added_by or 'N/A'} on {added_at}\n"
     
     await update.message.reply_html(text)
 
@@ -1146,6 +1461,9 @@ def main():
     application.add_handler(CommandHandler("addmod", add_moderator_command))
     application.add_handler(CommandHandler("delmod", remove_moderator_command))
     application.add_handler(CommandHandler("listmod", list_moderators_command))
+    application.add_handler(CommandHandler("addnotify", add_notify_command))
+    application.add_handler(CommandHandler("delnotify", remove_notify_command))
+    application.add_handler(CommandHandler("listnotify", list_notify_command))
     
     # Run the bot
     application.run_polling()
