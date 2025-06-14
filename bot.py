@@ -609,7 +609,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = user.username
     
     text = f"👋 Welcome {user.mention_html()}!\n\n"
-    text += "🤖 I'm your <b>Resource Allocation Bot</b> - I help teams manage shared resources like servers, devices, and accounts.\n\n"
+    text += "🤖 I'm your <b>Item Bot</b> - I help teams manage shared items like servers, devices, and accounts.\n\n"
     
     text += "🚀 <b>Quick Start:</b>\n"
     text += "• <code>/list</code> - See all available items\n"
@@ -669,7 +669,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.args:
         help_type = context.args[0].lower()
     
-    text = f"🤖 <b>Resource Allocation Bot Help</b>\n\n"
+    text = f"🤖 <b>Item Bot Help</b>\n\n"
     
     # Determine which sections to show
     show_user = help_type in [None, 'full']
@@ -684,7 +684,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if help_type == 'full':
             text += "👤 <b>USER COMMANDS</b>\n\n"
         
-        text += "This bot helps manage shared resources (servers, devices, accounts, etc.) in your team.\n\n"
+        text += "This bot helps manage shared items (servers, devices, accounts, etc.) in your team.\n\n"
         
         text += "📋 <b>How to Use:</b>\n\n"
         text += "<b>1. See available items:</b>\n"
