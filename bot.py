@@ -5,6 +5,7 @@ Telegram Bot for Resource Allocation Management
 
 import sqlite3
 import logging
+import sys
 from datetime import datetime
 from typing import Optional, List, Dict, Tuple
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -18,23 +19,60 @@ from telegram.ext import (
     filters
 )
 
-# Enable logging
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
+# Try to import configuration
+try:
+    from config import BOT_TOKEN, ADMIN_USER_IDS
+    # Optional config imports with defaults
+    try:
+        from config import DATABASE_PATH
+    except ImportError:
+        DATABASE_PATH = "resources.db"
+    
+    try:
+        from config import LOG_LEVEL
+    except ImportError:
+        LOG_LEVEL = "INFO"
+    
+    try:
+        from config import LOG_FILE
+    except ImportError:
+        LOG_FILE = None
+        
+except ImportError:
+    print("❌ Error: config.py not found!")
+    print("Please copy config.py.example to config.py and configure it:")
+    print("  cp config.py.example config.py")
+    print("  # Then edit config.py with your bot token and admin user IDs")
+    sys.exit(1)
 
-# Configuration
-BOT_TOKEN = "your-bot-token-here"
-ADMIN_USER_IDS = [79700973]  # Replace with actual admin user IDs
+
+# Configure logging
+log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+log_level = getattr(logging, LOG_LEVEL.upper(), logging.INFO)
+
+if LOG_FILE:
+    logging.basicConfig(
+        format=log_format,
+        level=log_level,
+        handlers=[
+            logging.FileHandler(LOG_FILE),
+            logging.StreamHandler()
+        ]
+    )
+else:
+    logging.basicConfig(
+        format=log_format,
+        level=log_level
+    )
+
+logger = logging.getLogger(__name__)
 
 # Conversation states
 ADDING_ITEM, EDITING_ITEM, ADDING_TYPE, TAKING_ITEM, TAKING_PURPOSE, STEALING_ITEM, BATCH_PROCESSING, BATCH_CONFIRMING = range(8)
 
 class ResourceBot:
-    def __init__(self, db_path: str = "resources.db"):
-        self.db_path = db_path
+    def __init__(self, db_path: str = None):
+        self.db_path = db_path or DATABASE_PATH
         self.init_database()
     
     def init_database(self):

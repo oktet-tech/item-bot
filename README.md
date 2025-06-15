@@ -74,13 +74,15 @@ You can use your package manager or install it manually:
 
 4. **Configure the bot**
 
-   Edit `bot.py` and set your configuration:
-
-   ```python
-   BOT_TOKEN = "your-bot-token-here"
-   ADMIN_USER_IDS = [your_telegram_user_id]
+   Copy the example configuration and edit it:
+   
+   ```bash
+   cp config.py.example config.py
+   # Edit config.py with your bot token and admin user IDs
    ```
 
+   **Important**: The bot will not start without a valid `config.py` file!
+   
    To get your Telegram user ID, message @userinfobot on Telegram.
 
 5. **Run the bot**
@@ -124,10 +126,10 @@ poetry run flake8 .
 ## Configuration
 
 ### Database Location
-By default, the database is stored as `resources.db` in the current directory. You can change this in the bot initialization:
+By default, the database is stored as `resources.db` in the current directory. You can change this in `config.py`:
 
 ```python
-bot = ResourceBot(db_path="custom_path/resources.db")
+DATABASE_PATH = "custom_path/resources.db"
 ```
 
 ## Troubleshooting
