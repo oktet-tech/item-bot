@@ -360,6 +360,38 @@ class ResourceBot:
         conn.close()
         return True, f"'{item_name}' is now free"
     
+    def purge_item(self, item_id: int, moderator: str) -> Tuple[bool, str]:
+        """Force-free an item (moderator only)"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        # Check if item exists
+        cursor.execute("SELECT name, owner FROM items WHERE id = ?", (item_id,))
+        result = cursor.fetchone()
+        
+        if not result:
+            conn.close()
+            return False, "Item not found"
+        
+        item_name, current_owner = result
+        
+        if not current_owner:
+            conn.close()
+            return False, f"'{item_name}' is already free"
+        
+        # Force-free the item
+        cursor.execute("UPDATE items SET owner = NULL, purpose = NULL WHERE id = ?", (item_id,))
+        
+        # Log the action
+        cursor.execute(
+            "INSERT INTO usage_history (item_id, user, action, purpose) VALUES (?, ?, ?, ?)",
+            (item_id, moderator, 'purge', f"force-freed from {current_owner}")
+        )
+        
+        conn.commit()
+        conn.close()
+        return True, f"'{item_name}' force-freed from {current_owner}"
+    
     def assign_item(self, item_id: int, to_user: str, by_user: str) -> Tuple[bool, str]:
         """Assign an item to a user (admin only)"""
         conn = self.get_connection()
@@ -587,6 +619,9 @@ async def notify_item_action(application, item_name: str, item_type_id: int, act
     elif action == 'assign':
         emoji = '👑'
         message = f"{emoji} <b>{item_name}</b> assigned to @{purpose} by @{user}"  # purpose contains target user for assign
+    elif action == 'purge':
+        emoji = '🧹'
+        message = f"{emoji} <b>{item_name}</b> force-freed by moderator @{user} from @{from_user}"
     else:
         return
     
@@ -675,6 +710,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += "• <code>/additem</code> - Add a new item\n"
         text += "• <code>/delitem</code> - Delete an item\n"
         text += "• <code>/assign</code> - Assign item to user\n"
+        text += "• <code>/purge</code> - Force-free any item\n"
         text += "• <code>/addnotify</code> - Enable notifications\n"
         text += "• <code>/delnotify</code> - Disable notifications\n"
         text += "• <code>/listnotify</code> - List notifications\n"
@@ -780,13 +816,15 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         text += "<b>Managing Items:</b>\n"
         text += "<code>/delitem WebServer1</code> → Delete an item\n"
-        text += "<code>/assign iPhone15 alice</code> → Force assign item to user\n\n"
+        text += "<code>/assign iPhone15 alice</code> → Force assign item to user\n"
+        text += "<code>/purge iPhone15</code> → Force-free item from current owner\n\n"
         
         text += "🛡️ <b>Moderator Commands:</b>\n"
         text += "<code>/additem</code> - Add new item (interactive)\n"
         text += "<code>/additem &lt;name&gt; &lt;group&gt; &lt;type&gt; &lt;description&gt;</code> - Add item with inline args\n"
         text += "<code>/delitem &lt;item_id_or_name&gt;</code> - Delete an item\n"
-        text += "<code>/assign &lt;item_id_or_name&gt; &lt;username&gt;</code> - Force assign item to user\n\n"
+        text += "<code>/assign &lt;item_id_or_name&gt; &lt;username&gt;</code> - Force assign item to user\n"
+        text += "<code>/purge &lt;item_id_or_name&gt;</code> - Force-free any item (removes from current owner)\n\n"
         
         text += "<code>/addnotify [type_name]</code> - Enable notifications (all types if no arg)\n"
         text += "<code>/delnotify [type_name]</code> - Disable notifications (all types if no arg)\n"
@@ -1322,6 +1360,41 @@ async def assign_item_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         item = next((i for i in items if i['id'] == item_id), None)
         if item:
             await notify_item_action(context.application, item['name'], item['type_id'], 'assign', by_user, to_user)
+
+async def purge_item_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Force-free an item (moderator/admin only)"""
+    user_id = update.effective_user.id
+    username = update.effective_user.username
+    
+    if not is_moderator_or_admin(user_id, username):
+        await update.message.reply_text("You don't have permission to use this command.")
+        return
+    
+    if not context.args:
+        await update.message.reply_text("Usage: /purge <item_id_or_name>")
+        return
+    
+    item_identifier = context.args[0]
+    
+    # Find item by name or ID
+    item_id = bot.find_item_by_name_or_id(item_identifier)
+    if item_id is None:
+        await update.message.reply_text("Item not found. Please enter a valid item ID or name.")
+        return
+    
+    moderator = update.effective_user.username or str(update.effective_user.id)
+    
+    # Get item details before purging for notification
+    items = bot.list_items()
+    item = next((i for i in items if i['id'] == item_id), None)
+    previous_owner = item['owner'] if item else None
+    
+    success, message = bot.purge_item(item_id, moderator)
+    await update.message.reply_text(message)
+    
+    # Send notifications
+    if success and item and previous_owner:
+        await notify_item_action(context.application, item['name'], item['type_id'], 'purge', moderator, None, previous_owner)
 
 async def add_moderator_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Add a moderator (admin only)"""
@@ -2020,6 +2093,7 @@ def main():
     application.add_handler(CommandHandler("free", free_item_command))
     application.add_handler(steal_item_handler)
     application.add_handler(CommandHandler("assign", assign_item_command))
+    application.add_handler(CommandHandler("purge", purge_item_command))
     application.add_handler(CommandHandler("addmod", add_moderator_command))
     application.add_handler(CommandHandler("delmod", remove_moderator_command))
     application.add_handler(CommandHandler("listmod", list_moderators_command))
