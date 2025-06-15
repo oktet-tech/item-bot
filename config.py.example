@@ -1,0 +1,25 @@
+# Configuration template for Item Bot
+# Copy this file to config.py and fill in your values
+
+# Telegram Bot Token (get from @BotFather)
+BOT_TOKEN = "your-bot-token-here"
+
+# Admin User IDs (get from @userinfobot)
+# Add your Telegram user ID here to become an admin
+ADMIN_USER_IDS = [
+    123456789,  # Replace with your actual user ID
+    # 987654321,  # Add more admin IDs as needed
+]
+
+# Database configuration
+DATABASE_PATH = "resources.db"
+
+# Logging configuration
+LOG_LEVEL = "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+LOG_FILE = "bot.log"  # Set to None to disable file logging
+
+# Optional: Environment-based configuration
+# Uncomment these lines to use environment variables instead
+# import os
+# BOT_TOKEN = os.getenv('BOT_TOKEN', BOT_TOKEN)
+# ADMIN_USER_IDS = [int(x) for x in os.getenv('ADMIN_USER_IDS', '').split(',') if x] 
