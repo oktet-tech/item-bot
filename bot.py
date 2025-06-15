@@ -622,7 +622,7 @@ def format_item_list(items: List[Dict]) -> str:
                 owner_text = '-'
             else:
                 icon = '📍'  # Taken (same as take action)
-                owner_text = f"@{item['owner']}"
+                owner_text = f"{item['owner']}"
                 if item['purpose'] and item['purpose'].strip():
                     owner_text += f": {item['purpose']}"
             
