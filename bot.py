@@ -1779,7 +1779,7 @@ async def list_users_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     text = "<b>Authorized Users:</b>\n\n"
     for user_id, username, added_by, added_at in users:
-        user_display = f"@{username}" if username else f"User ID {user_id}"
+        user_display = f"{username}" if username else f"User ID {user_id}"
         text += f"• {user_display} (ID: {user_id})\n"
         text += f"  Added by: {added_by or 'N/A'}\n"
         text += f"  Added: {added_at}\n\n"
