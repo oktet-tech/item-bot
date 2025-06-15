@@ -124,14 +124,19 @@ See `/help full` for all available commands.
 
 ### Code Style
 
-The project uses Black for code formatting and Flake8 for linting:
+The project uses Ruff for both linting and code formatting:
 
 ```bash
-# Format code
-poetry run black .
+# Check linting and formatting
+./lint.sh
 
-# Check linting
-poetry run flake8 .
+# Auto-fix issues and format code
+./format.sh
+
+# Or run ruff commands directly:
+poetry run ruff check .          # Check for linting issues
+poetry run ruff check --fix .    # Auto-fix linting issues
+poetry run ruff format .         # Format code
 ```
 
 ## Configuration
