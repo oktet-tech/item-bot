@@ -250,8 +250,15 @@ class ResourceBot:
         return success
     
     def list_items(self, group: Optional[str] = None, type_id: Optional[int] = None,
-                   owner: Optional[str] = None) -> List[Dict]:
-        """List items with optional filters"""
+                   owner: Optional[str] = None, free_only: bool = False) -> List[Dict]:
+        """List items with optional filters
+        
+        Args:
+            group: Filter by group name
+            type_id: Filter by type ID
+            owner: Filter by owner username (None means no filter)
+            free_only: If True, only show items with no owner
+        """
         conn = self.get_connection()
         cursor = conn.cursor()
         
@@ -275,6 +282,8 @@ class ResourceBot:
         if owner:
             query += " AND i.owner = ?"
             params.append(owner)
+        elif free_only:
+            query += " AND i.owner IS NULL"
         
         query += " ORDER BY i.group_name, i.name"
         
@@ -1109,7 +1118,7 @@ async def take_item_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
     
     if item['owner']:
-        await update.message.reply_text(f"Item '{item['name']}' is already owned by @{item['owner']}.")
+        await update.message.reply_text(f"Item '{item['name']}' is already owned by {item['owner']}.")
         return ConversationHandler.END
     
     # If purpose provided, take immediately
@@ -1162,7 +1171,7 @@ async def take_purpose_finish(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def take_item_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start taking an item"""
     # Show available free items
-    items = bot.list_items(owner=None)
+    items = bot.list_items(free_only=True)
     
     if not items:
         await update.message.reply_text('No free items available.')
