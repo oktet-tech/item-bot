@@ -593,26 +593,57 @@ class ResourceBot:
         return chats
     
     # Authorized users management methods
-    def add_authorized_user(self, user_id: int, username: str, added_by: str) -> bool:
-        """Add an authorized user"""
+    def add_authorized_user(self, user_id: int = None, username: str = None, added_by: str = None) -> bool:
+        """Add an authorized user by user_id or username"""
+        if not user_id and not username:
+            return False
+            
         try:
             conn = self.get_connection()
             cursor = conn.cursor()
-            cursor.execute(
-                "INSERT INTO authorized_users (user_id, username, added_by) VALUES (?, ?, ?)",
-                (user_id, username, added_by)
-            )
+            
+            # If we have user_id, use it directly
+            if user_id:
+                cursor.execute(
+                    "INSERT INTO authorized_users (user_id, username, added_by) VALUES (?, ?, ?)",
+                    (user_id, username, added_by)
+                )
+            else:
+                # Check if username already exists
+                cursor.execute("SELECT 1 FROM authorized_users WHERE username = ? COLLATE NOCASE", (username,))
+                if cursor.fetchone():
+                    conn.close()
+                    return False  # Username already exists
+                
+                # Generate a unique negative user_id for username-only entries
+                cursor.execute("SELECT MIN(user_id) FROM authorized_users WHERE user_id < 0")
+                min_id = cursor.fetchone()[0]
+                placeholder_id = (min_id - 1) if min_id else -1
+                
+                cursor.execute(
+                    "INSERT INTO authorized_users (user_id, username, added_by) VALUES (?, ?, ?)",
+                    (placeholder_id, username, added_by)
+                )
+            
             conn.commit()
             conn.close()
             return True
         except sqlite3.IntegrityError:
             return False
     
-    def remove_authorized_user(self, user_id: int) -> bool:
-        """Remove an authorized user"""
+    def remove_authorized_user(self, user_id: int = None, username: str = None) -> bool:
+        """Remove an authorized user by user_id or username"""
+        if not user_id and not username:
+            return False
+            
         conn = self.get_connection()
         cursor = conn.cursor()
-        cursor.execute("DELETE FROM authorized_users WHERE user_id = ?", (user_id,))
+        
+        if user_id:
+            cursor.execute("DELETE FROM authorized_users WHERE user_id = ?", (user_id,))
+        else:
+            cursor.execute("DELETE FROM authorized_users WHERE username = ? COLLATE NOCASE", (username,))
+            
         success = cursor.rowcount > 0
         conn.commit()
         conn.close()
@@ -629,12 +660,28 @@ class ResourceBot:
         conn.close()
         return users
     
-    def is_authorized_user(self, user_id: int) -> bool:
-        """Check if user is authorized"""
+    def is_authorized_user(self, user_id: int, username: str = None) -> bool:
+        """Check if user is authorized by user_id or username"""
         conn = self.get_connection()
         cursor = conn.cursor()
+        
+        # Check by user_id first
         cursor.execute("SELECT 1 FROM authorized_users WHERE user_id = ?", (user_id,))
         result = cursor.fetchone()
+        
+        # If not found by user_id and we have a username, check by username
+        if not result and username:
+            cursor.execute("SELECT 1 FROM authorized_users WHERE username = ? COLLATE NOCASE", (username,))
+            result = cursor.fetchone()
+            
+            # If found by username, update the record with the actual user_id
+            if result:
+                cursor.execute(
+                    "UPDATE authorized_users SET user_id = ? WHERE username = ? COLLATE NOCASE AND user_id < 0",
+                    (user_id, username)
+                )
+                conn.commit()
+        
         conn.close()
         return result is not None
 
@@ -703,7 +750,7 @@ def is_user_authorized(user_id: int, username: str) -> bool:
     if is_moderator_or_admin(user_id, username):
         return True
     # Check if user is in authorized users list
-    return bot.is_authorized_user(user_id)
+    return bot.is_authorized_user(user_id, username)
 
 def require_authorization(func):
     """Decorator to require user authorization for command handlers"""
@@ -929,9 +976,11 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += "<code>/delmod bob</code> → Remove bob from moderators\n\n"
         
         text += "<b>3. Manage authorized users:</b>\n"
+        text += "<code>/adduser @alice</code> → Add user by username\n"
         text += "<code>/adduser 123456789 alice</code> → Add user by ID and username\n"
+        text += "<code>/deluser @alice</code> → Remove user by username\n"
         text += "<code>/listuser</code> → See all authorized users\n"
-        text += "<code>/deluser 123456789</code> → Remove user authorization\n\n"
+        text += "<i>💡 Reply to any message with /adduser or /deluser</i>\n\n"
         
         text += "<b>4. Manage types:</b>\n"
         text += "<code>/listtypes</code> → See all item types\n"
@@ -947,9 +996,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += "<code>/delmod &lt;username&gt;</code> - Remove moderator\n"
         text += "<code>/listmod</code> - List all moderators\n\n"
         
-        text += "<code>/adduser &lt;user_id&gt; [username]</code> - Add authorized user\n"
-        text += "<code>/deluser &lt;user_id&gt;</code> - Remove authorized user\n"
+        text += "<code>/adduser &lt;@username|user_id&gt;</code> - Add authorized user\n"
+        text += "<code>/deluser &lt;user_id|@username&gt;</code> - Remove authorized user\n"
         text += "<code>/listuser</code> - List all authorized users\n"
+        text += "<i>💡 Tip: Reply to any user's message with /adduser or /deluser</i>\n"
         text += "<code>/listhist [N]</code> - View latest N usage history entries (default: 10)\n\n"
         
         text += "🗄️ <b>Database Management:</b>\n"
@@ -1569,20 +1619,68 @@ async def add_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("You don't have permission to use this command.")
         return
     
+    # Check if this is a reply to another user's message
+    if update.message.reply_to_message and update.message.reply_to_message.from_user:
+        target_user = update.message.reply_to_message.from_user
+        user_id = target_user.id
+        username = target_user.username
+        added_by = update.effective_user.username or str(update.effective_user.id)
+        
+        success = bot.add_authorized_user(user_id=user_id, username=username, added_by=added_by)
+        
+        if success:
+            user_display = f"@{username}" if username else f"User ID {user_id}"
+            await update.message.reply_text(f"✅ {user_display} has been authorized to use the bot.")
+        else:
+            await update.message.reply_text(f"❌ User {user_display} is already authorized.")
+        return
+    
     if not context.args:
-        await update.message.reply_text("Usage: /adduser <user_id> [username]")
+        await update.message.reply_text(
+            "Usage:\n"
+            "• /adduser @username - Add by username\n"
+            "• /adduser <user_id> [username] - Add by numeric ID\n"
+            "• Reply to a user's message with /adduser - Add that user"
+        )
         return
     
-    try:
-        user_id = int(context.args[0])
-    except ValueError:
-        await update.message.reply_text("Invalid user ID. Please provide a numeric user ID.")
-        return
+    identifier = context.args[0]
+    user_id = None
+    username = None
     
-    username = context.args[1] if len(context.args) > 1 else None
+    # Check if it's a username (starts with @)
+    if identifier.startswith('@'):
+        username = identifier[1:]  # Remove @ prefix
+        added_by = update.effective_user.username or str(update.effective_user.id)
+        
+        success = bot.add_authorized_user(username=username, added_by=added_by)
+        
+        if success:
+            await update.message.reply_text(
+                f"✅ @{username} has been authorized to use the bot.\n"
+                f"<i>Note: Authorization will take effect when they next interact with the bot.</i>",
+                parse_mode='HTML'
+            )
+        else:
+            await update.message.reply_text(f"❌ @{username} is already authorized.")
+        return
+    else:
+        # Try to parse as numeric user ID
+        try:
+            user_id = int(identifier)
+            username = context.args[1] if len(context.args) > 1 else None
+        except ValueError:
+            await update.message.reply_text(
+                "Invalid format. Use:\n"
+                "• /adduser @username\n"
+                "• /adduser 123456789 [username]\n"
+                "• Reply to a user's message with /adduser"
+            )
+            return
+    
     added_by = update.effective_user.username or str(update.effective_user.id)
     
-    success = bot.add_authorized_user(user_id, username, added_by)
+    success = bot.add_authorized_user(user_id=user_id, username=username, added_by=added_by)
     
     if success:
         user_display = f"@{username}" if username else f"User ID {user_id}"
@@ -1596,17 +1694,71 @@ async def remove_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("You don't have permission to use this command.")
         return
     
+    # Check if this is a reply to another user's message
+    if update.message.reply_to_message and update.message.reply_to_message.from_user:
+        target_user = update.message.reply_to_message.from_user
+        user_id = target_user.id
+        username = target_user.username
+        
+        success = bot.remove_authorized_user(user_id=user_id)
+        
+        if success:
+            user_display = f"@{username}" if username else f"User ID {user_id}"
+            await update.message.reply_text(f"✅ {user_display} has been removed from authorized users.")
+        else:
+            user_display = f"@{username}" if username else f"User ID {user_id}"
+            await update.message.reply_text(f"❌ {user_display} was not found in authorized users.")
+        return
+    
     if not context.args:
-        await update.message.reply_text("Usage: /deluser <user_id>")
+        await update.message.reply_text(
+            "Usage:\n"
+            "• /deluser <user_id> - Remove by numeric ID\n"
+            "• /deluser @username - Remove by username (searches authorized users)\n"
+            "• Reply to a user's message with /deluser - Remove that user"
+        )
         return
     
-    try:
-        user_id = int(context.args[0])
-    except ValueError:
-        await update.message.reply_text("Invalid user ID. Please provide a numeric user ID.")
-        return
+    identifier = context.args[0]
+    user_id = None
     
-    success = bot.remove_authorized_user(user_id)
+    # Check if it's a username (starts with @)
+    if identifier.startswith('@'):
+        username = identifier[1:]  # Remove @ prefix
+        
+        # Search for user in authorized users list by username
+        authorized_users = bot.list_authorized_users()
+        found_user = None
+        for uid, uname, added_by, added_at in authorized_users:
+            if uname and uname.lower() == username.lower():
+                found_user = (uid, uname)
+                break
+        
+        if not found_user:
+            await update.message.reply_text(f"❌ @{username} not found in authorized users list.")
+            return
+        
+        success = bot.remove_authorized_user(username=username)
+        
+        if success:
+            await update.message.reply_text(f"✅ @{username} has been removed from authorized users.")
+        else:
+            await update.message.reply_text(f"❌ Failed to remove @{username} from authorized users.")
+        return
+    else:
+        # Try to parse as numeric user ID
+        try:
+            user_id = int(identifier)
+        except ValueError:
+            await update.message.reply_text(
+                "Invalid format. Use:\n"
+                "• /deluser 123456789\n"
+                "• /deluser @username\n"
+                "• Reply to a user's message with /deluser"
+            )
+            return
+    
+    success = bot.remove_authorized_user(user_id=user_id)
     
     if success:
         await update.message.reply_text(f"✅ User ID {user_id} has been removed from authorized users.")
