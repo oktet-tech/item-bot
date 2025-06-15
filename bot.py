@@ -140,6 +140,17 @@ class ResourceBot:
             )
         ''')
         
+        # Create authorized users table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS authorized_users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER UNIQUE NOT NULL,
+                username TEXT,
+                added_by TEXT,
+                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
         # Add purpose column if it doesn't exist (migration for existing databases)
         try:
             cursor.execute("ALTER TABLE items ADD COLUMN purpose TEXT")
@@ -580,6 +591,52 @@ class ResourceBot:
         chats = cursor.fetchall()
         conn.close()
         return chats
+    
+    # Authorized users management methods
+    def add_authorized_user(self, user_id: int, username: str, added_by: str) -> bool:
+        """Add an authorized user"""
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO authorized_users (user_id, username, added_by) VALUES (?, ?, ?)",
+                (user_id, username, added_by)
+            )
+            conn.commit()
+            conn.close()
+            return True
+        except sqlite3.IntegrityError:
+            return False
+    
+    def remove_authorized_user(self, user_id: int) -> bool:
+        """Remove an authorized user"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM authorized_users WHERE user_id = ?", (user_id,))
+        success = cursor.rowcount > 0
+        conn.commit()
+        conn.close()
+        return success
+    
+    def list_authorized_users(self) -> List[Tuple[int, str, str, str]]:
+        """List all authorized users"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT user_id, username, added_by, added_at FROM authorized_users ORDER BY added_at"
+        )
+        users = cursor.fetchall()
+        conn.close()
+        return users
+    
+    def is_authorized_user(self, user_id: int) -> bool:
+        """Check if user is authorized"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1 FROM authorized_users WHERE user_id = ?", (user_id,))
+        result = cursor.fetchone()
+        conn.close()
+        return result is not None
 
 # Bot instance
 bot = ResourceBot()
@@ -640,6 +697,24 @@ def is_moderator_or_admin(user_id: int, username: str) -> bool:
         return bot.is_moderator(username)
     return False
 
+def is_user_authorized(user_id: int, username: str) -> bool:
+    """Check if user is authorized to use the bot (admin, moderator, or whitelisted)"""
+    # Admins and moderators are always authorized
+    if is_moderator_or_admin(user_id, username):
+        return True
+    # Check if user is in authorized users list
+    return bot.is_authorized_user(user_id)
+
+def require_authorization(func):
+    """Decorator to require user authorization for command handlers"""
+    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = update.effective_user
+        if not is_user_authorized(user.id, user.username):
+            await update.message.reply_text("❌ You are not authorized to use this bot. Please contact an administrator.")
+            return
+        return await func(update, context)
+    return wrapper
+
 def format_item_list(items: List[Dict]) -> str:
     """Format items list for display as HTML list"""
     if not items:
@@ -684,6 +759,7 @@ def format_item_list(items: List[Dict]) -> str:
     return text
 
 # Command handlers
+@require_authorization
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Send a message when the command /start is issued."""
     user = update.effective_user
@@ -724,6 +800,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += "• <code>/addmod</code> - Add moderator\n"
         text += "• <code>/delmod</code> - Remove moderator\n"
         text += "• <code>/listmod</code> - List moderators\n"
+        text += "• <code>/adduser</code> - Add authorized user\n"
+        text += "• <code>/deluser</code> - Remove authorized user\n"
+        text += "• <code>/listuser</code> - List authorized users\n"
         text += "• <code>/listhist</code> - View usage history\n"
         text += "• <code>/help admin</code> - Admin setup guide\n\n"
         
@@ -741,6 +820,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_html(text)
 
+@require_authorization
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Send detailed help with examples"""
     user = update.effective_user
@@ -848,7 +928,12 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += "<code>/listmod</code> → See all moderators\n"
         text += "<code>/delmod bob</code> → Remove bob from moderators\n\n"
         
-        text += "<b>3. Manage types:</b>\n"
+        text += "<b>3. Manage authorized users:</b>\n"
+        text += "<code>/adduser 123456789 alice</code> → Add user by ID and username\n"
+        text += "<code>/listuser</code> → See all authorized users\n"
+        text += "<code>/deluser 123456789</code> → Remove user authorization\n\n"
+        
+        text += "<b>4. Manage types:</b>\n"
         text += "<code>/listtypes</code> → See all item types\n"
         text += "<code>/deltype 1</code> → Delete unused type\n\n"
         
@@ -860,7 +945,11 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         text += "<code>/addmod &lt;username&gt;</code> - Add moderator\n"
         text += "<code>/delmod &lt;username&gt;</code> - Remove moderator\n"
-        text += "<code>/listmod</code> - List all moderators\n"
+        text += "<code>/listmod</code> - List all moderators\n\n"
+        
+        text += "<code>/adduser &lt;user_id&gt; [username]</code> - Add authorized user\n"
+        text += "<code>/deluser &lt;user_id&gt;</code> - Remove authorized user\n"
+        text += "<code>/listuser</code> - List all authorized users\n"
         text += "<code>/listhist [N]</code> - View latest N usage history entries (default: 10)\n\n"
         
         text += "🗄️ <b>Database Management:</b>\n"
@@ -883,6 +972,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_html(text)
 
+@require_authorization
 async def list_items_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """List all items with optional filters"""
     # Parse filters from command arguments
@@ -928,6 +1018,7 @@ async def list_items_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.message.reply_html(text)
 
 # Admin command handlers
+@require_authorization
 async def add_item_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start adding a new item"""
     user_id = update.effective_user.id
@@ -993,6 +1084,7 @@ async def add_item_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     return ADDING_ITEM
 
+@require_authorization
 async def add_item_finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Finish adding a new item"""
     text = update.message.text.strip()
@@ -1037,6 +1129,7 @@ async def add_item_finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     return ConversationHandler.END
 
+@require_authorization
 async def add_type_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start adding a new type"""
     if not is_admin(update.effective_user.id):
@@ -1058,6 +1151,7 @@ async def add_type_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Please enter the name for the new type:")
     return ADDING_TYPE
 
+@require_authorization
 async def add_type_finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Finish adding a new type"""
     type_name = update.message.text.strip()
@@ -1071,6 +1165,7 @@ async def add_type_finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     return ConversationHandler.END
 
+@require_authorization
 async def list_types_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """List all types"""
     if not is_admin(update.effective_user.id):
@@ -1089,6 +1184,7 @@ async def list_types_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     await update.message.reply_text(text)
 
+@require_authorization
 async def delete_type_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Delete a type"""
     if not is_admin(update.effective_user.id):
@@ -1104,6 +1200,7 @@ async def delete_type_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     await update.message.reply_text(message)
 
+@require_authorization
 async def delete_item_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Delete an item"""
     user_id = update.effective_user.id
@@ -1131,6 +1228,7 @@ async def delete_item_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("Failed to delete item. Item might not exist.")
 
 # User command handlers
+@require_authorization
 async def take_item_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Take an item with new syntax: /take <item_name> [purpose]"""
     args = context.args
@@ -1178,6 +1276,7 @@ async def take_item_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"What is the purpose for taking <b>{item['name']}</b>?", parse_mode='HTML')
     return TAKING_PURPOSE
 
+@require_authorization
 async def take_purpose_finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Finish taking item after purpose is provided"""
     purpose = update.message.text.strip()
@@ -1206,6 +1305,7 @@ async def take_purpose_finish(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     return ConversationHandler.END
 
+@require_authorization
 async def take_item_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start taking an item"""
     # Show available free items
@@ -1222,6 +1322,7 @@ async def take_item_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_html(text)
     return TAKING_ITEM
+@require_authorization
 async def take_item_finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Finish taking an item"""
     text = update.message.text.strip()
@@ -1249,6 +1350,7 @@ async def take_item_finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     return ConversationHandler.END
 
+@require_authorization
 async def free_item_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Free an item owned by the user"""
     user = update.effective_user.username or str(update.effective_user.id)
@@ -1281,6 +1383,7 @@ async def free_item_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if item:
             await notify_item_action(context.application, item['name'], item['type_id'], 'free', user)
 
+@require_authorization
 async def steal_item_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start stealing an item"""
     user = update.effective_user.username or str(update.effective_user.id)
@@ -1300,6 +1403,7 @@ async def steal_item_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_html(text)
     return STEALING_ITEM
 
+@require_authorization
 async def steal_item_finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Finish stealing an item"""
     text = update.message.text.strip()
@@ -1328,6 +1432,7 @@ async def steal_item_finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     return ConversationHandler.END
 
+@require_authorization
 async def assign_item_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Assign an item to a user (moderator/admin only)"""
     user_id = update.effective_user.id
@@ -1361,6 +1466,7 @@ async def assign_item_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         if item:
             await notify_item_action(context.application, item['name'], item['type_id'], 'assign', by_user, to_user)
 
+@require_authorization
 async def purge_item_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Force-free an item (moderator/admin only)"""
     user_id = update.effective_user.id
@@ -1396,6 +1502,7 @@ async def purge_item_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if success and item and previous_owner:
         await notify_item_action(context.application, item['name'], item['type_id'], 'purge', moderator, None, previous_owner)
 
+@require_authorization
 async def add_moderator_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Add a moderator (admin only)"""
     if not is_admin(update.effective_user.id):
@@ -1416,6 +1523,7 @@ async def add_moderator_command(update: Update, context: ContextTypes.DEFAULT_TY
     else:
         await update.message.reply_text(f"❌ @{username} is already a moderator.")
 
+@require_authorization
 async def remove_moderator_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Remove a moderator (admin only)"""
     if not is_admin(update.effective_user.id):
@@ -1434,6 +1542,7 @@ async def remove_moderator_command(update: Update, context: ContextTypes.DEFAULT
     else:
         await update.message.reply_text(f"❌ @{username} was not a moderator.")
 
+@require_authorization
 async def list_moderators_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """List all moderators (admin only)"""
     if not is_admin(update.effective_user.id):
@@ -1454,6 +1563,80 @@ async def list_moderators_command(update: Update, context: ContextTypes.DEFAULT_
     
     await update.message.reply_html(text)
 
+async def add_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Add an authorized user (admin only)"""
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("You don't have permission to use this command.")
+        return
+    
+    if not context.args:
+        await update.message.reply_text("Usage: /adduser <user_id> [username]")
+        return
+    
+    try:
+        user_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("Invalid user ID. Please provide a numeric user ID.")
+        return
+    
+    username = context.args[1] if len(context.args) > 1 else None
+    added_by = update.effective_user.username or str(update.effective_user.id)
+    
+    success = bot.add_authorized_user(user_id, username, added_by)
+    
+    if success:
+        user_display = f"@{username}" if username else f"User ID {user_id}"
+        await update.message.reply_text(f"✅ {user_display} has been authorized to use the bot.")
+    else:
+        await update.message.reply_text(f"❌ User ID {user_id} is already authorized.")
+
+async def remove_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Remove an authorized user (admin only)"""
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("You don't have permission to use this command.")
+        return
+    
+    if not context.args:
+        await update.message.reply_text("Usage: /deluser <user_id>")
+        return
+    
+    try:
+        user_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("Invalid user ID. Please provide a numeric user ID.")
+        return
+    
+    success = bot.remove_authorized_user(user_id)
+    
+    if success:
+        await update.message.reply_text(f"✅ User ID {user_id} has been removed from authorized users.")
+    else:
+        await update.message.reply_text(f"❌ User ID {user_id} was not found in authorized users.")
+
+async def list_users_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """List all authorized users (admin only)"""
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("You don't have permission to use this command.")
+        return
+    
+    users = bot.list_authorized_users()
+    
+    if not users:
+        await update.message.reply_text("No authorized users configured.\n\n<i>Note: Admins and moderators are automatically authorized.</i>", parse_mode='HTML')
+        return
+    
+    text = "<b>Authorized Users:</b>\n\n"
+    for user_id, username, added_by, added_at in users:
+        user_display = f"@{username}" if username else f"User ID {user_id}"
+        text += f"• {user_display} (ID: {user_id})\n"
+        text += f"  Added by: {added_by or 'N/A'}\n"
+        text += f"  Added: {added_at}\n\n"
+    
+    text += "<i>Note: Admins and moderators are automatically authorized and not shown here.</i>"
+    
+    await update.message.reply_html(text)
+
+@require_authorization
 async def add_notify_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Add notification subscription (moderator/admin only)"""
     user_id = update.effective_user.id
@@ -1508,6 +1691,7 @@ async def add_notify_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         else:
             await update.message.reply_html('❌ Notifications for <b>all item types</b> are already enabled in this chat.')
 
+@require_authorization
 async def remove_notify_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Remove notification subscription (moderator/admin only)"""
     user_id = update.effective_user.id
@@ -1560,6 +1744,7 @@ async def remove_notify_command(update: Update, context: ContextTypes.DEFAULT_TY
         else:
             await update.message.reply_text("❌ No notification subscriptions found in this chat.")
 
+@require_authorization
 async def list_notify_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """List all notification subscriptions (moderator/admin only)"""
     user_id = update.effective_user.id
@@ -1602,6 +1787,7 @@ async def list_notify_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     await update.message.reply_html(text)
 
+@require_authorization
 async def list_history_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """List usage history (admin only)"""
     if not is_admin(update.effective_user.id):
@@ -1685,6 +1871,7 @@ async def list_history_command(update: Update, context: ContextTypes.DEFAULT_TYP
     
     await update.message.reply_html(text)
 
+@require_authorization
 async def batch_command_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start batch command processing (admin only)"""
     if not is_admin(update.effective_user.id):
@@ -1704,6 +1891,7 @@ async def batch_command_start(update: Update, context: ContextTypes.DEFAULT_TYPE
     )
     return BATCH_PROCESSING
 
+@require_authorization
 async def batch_command_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Process uploaded batch file or text input"""
     admin_user = update.effective_user.username or str(update.effective_user.id)
@@ -1776,6 +1964,7 @@ async def batch_command_process(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text(f"❌ Failed to process file: {str(e)}")
         return ConversationHandler.END
 
+@require_authorization
 async def batch_command_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Execute confirmed batch commands"""
     if update.message.text.strip().upper() != 'EXECUTE':
@@ -1887,6 +2076,7 @@ async def batch_command_execute(update: Update, context: ContextTypes.DEFAULT_TY
     logger.warning(f"Admin {admin_user} completed batch execution: {executed} success, {failed} failed")
     return ConversationHandler.END
 
+@require_authorization
 async def wipe_database_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Wipe and bootstrap the database (admin only)"""
     if not is_admin(update.effective_user.id):
@@ -1934,6 +2124,7 @@ async def wipe_database_command(update: Update, context: ContextTypes.DEFAULT_TY
         logger.error(f"Failed to wipe database: {e}")
         await update.message.reply_text(f"❌ Failed to wipe database: {str(e)}")
 
+@require_authorization
 async def dump_database_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Dump database as bot commands (admin only)"""
     if not is_admin(update.effective_user.id):
@@ -2097,6 +2288,9 @@ def main():
     application.add_handler(CommandHandler("addmod", add_moderator_command))
     application.add_handler(CommandHandler("delmod", remove_moderator_command))
     application.add_handler(CommandHandler("listmod", list_moderators_command))
+    application.add_handler(CommandHandler("adduser", add_user_command))
+    application.add_handler(CommandHandler("deluser", remove_user_command))
+    application.add_handler(CommandHandler("listuser", list_users_command))
     application.add_handler(CommandHandler("addnotify", add_notify_command))
     application.add_handler(CommandHandler("delnotify", remove_notify_command))
     application.add_handler(CommandHandler("listnotify", list_notify_command))
