@@ -196,10 +196,11 @@ class ResourceBot:
             cursor = conn.cursor()
             cursor.execute("INSERT INTO types (name) VALUES (?)", (type_name,))
             conn.commit()
-            conn.close()
             return True
         except sqlite3.IntegrityError:
             return False
+        finally:
+            conn.close()
 
     def list_types(self) -> List[Tuple[int, str]]:
         """List all item types"""
@@ -239,10 +240,11 @@ class ResourceBot:
                 (name, group, type_id, description),
             )
             conn.commit()
-            conn.close()
             return True
         except sqlite3.IntegrityError:
             return False
+        finally:
+            conn.close()
 
     def edit_item(self, item_id: int, type_id: Optional[int] = None, group: Optional[str] = None) -> bool:
         """Edit an existing item"""
@@ -601,10 +603,11 @@ class ResourceBot:
                 (username, added_by),
             )
             conn.commit()
-            conn.close()
             return True
         except sqlite3.IntegrityError:
             return False
+        finally:
+            conn.close()
 
     def remove_moderator(self, username: str) -> bool:
         """Remove a moderator"""
@@ -645,10 +648,11 @@ class ResourceBot:
                 (chat_id, chat_title, type_id, added_by),
             )
             conn.commit()
-            conn.close()
             return True
         except sqlite3.IntegrityError:
             return False
+        finally:
+            conn.close()
 
     def remove_notification(self, chat_id: int, type_id: Optional[int] = None) -> int:
         """Remove notification subscription(s). Returns number of removed records"""
@@ -727,7 +731,6 @@ class ResourceBot:
                     (username,),
                 )
                 if cursor.fetchone():
-                    conn.close()
                     return False  # Username already exists
 
                 # Generate a unique negative user_id for username-only entries
@@ -741,10 +744,11 @@ class ResourceBot:
                 )
 
             conn.commit()
-            conn.close()
             return True
         except sqlite3.IntegrityError:
             return False
+        finally:
+            conn.close()
 
     def remove_authorized_user(self, user_id: int = None, username: str = None) -> bool:
         """Remove an authorized user by user_id or username"""
