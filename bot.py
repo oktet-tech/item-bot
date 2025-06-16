@@ -174,6 +174,13 @@ class ResourceBot:
             # Column already exists, ignore
             pass
 
+        # Add note column if it doesn't exist (migration for existing databases)
+        try:
+            cursor.execute("ALTER TABLE items ADD COLUMN note TEXT")
+        except sqlite3.OperationalError:
+            # Column already exists, ignore
+            pass
+
         conn.commit()
         conn.close()
 
@@ -265,6 +272,69 @@ class ResourceBot:
         conn.close()
         return success
 
+    def edit_item_description(self, item_id: int, description: str) -> Tuple[bool, str]:
+        """Edit item description"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        # Check if item exists
+        cursor.execute("SELECT name FROM items WHERE id = ?", (item_id,))
+        result = cursor.fetchone()
+
+        if not result:
+            conn.close()
+            return False, "Item not found"
+
+        item_name = result[0]
+
+        # Update description
+        cursor.execute("UPDATE items SET description = ? WHERE id = ?", (description, item_id))
+        conn.commit()
+        conn.close()
+        return True, f"Description updated for '{item_name}'"
+
+    def set_item_note(self, item_id: int, note: str) -> Tuple[bool, str]:
+        """Set or update item note"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        # Check if item exists
+        cursor.execute("SELECT name FROM items WHERE id = ?", (item_id,))
+        result = cursor.fetchone()
+
+        if not result:
+            conn.close()
+            return False, "Item not found"
+
+        item_name = result[0]
+
+        # Update note
+        cursor.execute("UPDATE items SET note = ? WHERE id = ?", (note, item_id))
+        conn.commit()
+        conn.close()
+        return True, f"Note set for '{item_name}'"
+
+    def drop_item_note(self, item_id: int) -> Tuple[bool, str]:
+        """Remove item note"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        # Check if item exists
+        cursor.execute("SELECT name FROM items WHERE id = ?", (item_id,))
+        result = cursor.fetchone()
+
+        if not result:
+            conn.close()
+            return False, "Item not found"
+
+        item_name = result[0]
+
+        # Remove note
+        cursor.execute("UPDATE items SET note = NULL WHERE id = ?", (item_id,))
+        conn.commit()
+        conn.close()
+        return True, f"Note removed from '{item_name}'"
+
     def delete_item(self, item_id: int) -> bool:
         """Delete an item"""
         conn = self.get_connection()
@@ -295,7 +365,7 @@ class ResourceBot:
 
         query = """
             SELECT i.id, i.name, i.group_name, i.type_id, t.name as type_name,
-                   i.owner, i.purpose, i.description
+                   i.owner, i.purpose, i.description, i.note
             FROM items i
             LEFT JOIN types t ON i.type_id = t.id
             WHERE 1=1
@@ -866,7 +936,13 @@ def format_item_list(items: List[Dict]) -> str:
             type_desc = f"{item['type_name'] or 'No type'}"
             if item["description"]:
                 type_desc += f" : {item['description']}"
-            text += f"   • <i>{type_desc}</i>\n\n"
+            text += f"   • <i>{type_desc}</i>\n"
+
+            # Add note if present
+            if item.get("note") and item["note"].strip():
+                text += f"   📝 <i>{item['note']}</i>\n"
+
+            text += "\n"
 
         text += "\n"
 
@@ -894,12 +970,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text += "• <code>/list</code> - List all items (with filters)\n"
     text += "• <code>/take</code> - Take a free item\n"
     text += "• <code>/free</code> - Free an item you own\n"
-    text += "• <code>/steal</code> - Steal an item (urgent situations)\n\n"
+    text += "• <code>/steal</code> - Steal an item (urgent situations)\n"
+    text += "• <code>/noteset</code> - Add note to any item\n"
+    text += "• <code>/notedrop</code> - Remove note from any item\n\n"
 
     if is_moderator_or_admin(user_id, username):
         text += "🛡️ <b>Your Moderator Commands:</b>\n"
         text += "• <code>/additem</code> - Add a new item\n"
         text += "• <code>/delitem</code> - Delete an item\n"
+        text += "• <code>/edititem</code> - Edit item description\n"
         text += "• <code>/assign</code> - Assign item to user\n"
         text += "• <code>/purge</code> - Force-free any item\n"
         text += "• <code>/addnotify</code> - Enable notifications\n"
@@ -988,7 +1067,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += "<code>/list</code> - List all items (add filters: group, type, owner)\n"
         text += "<code>/take &lt;item_name&gt; [purpose]</code> - Take a free item\n"
         text += "<code>/free &lt;item_id&gt;</code> - Free an item you own\n"
-        text += "<code>/steal</code> - Steal an item from someone (use responsibly!)\n\n"
+        text += "<code>/steal</code> - Steal an item from someone (use responsibly!)\n"
+        text += "<code>/noteset &lt;item_name&gt; &lt;note&gt;</code> - Add note to any item\n"
+        text += "<code>/notedrop &lt;item_name&gt;</code> - Remove note from any item\n\n"
 
         text += "💡 <b>Tips:</b>\n"
         text += "• Always provide a purpose when taking/stealing items\n"
@@ -1012,13 +1093,20 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         text += "<b>Managing Items:</b>\n"
         text += "<code>/delitem WebServer1</code> → Delete an item\n"
+        text += "<code>/edititem WebServer1 Updated production server with new specs</code> → Edit description\n"
         text += "<code>/assign iPhone15 alice</code> → Force assign item to user\n"
         text += "<code>/purge iPhone15</code> → Force-free item from current owner\n\n"
+
+        text += "<b>Adding Notes (All Users):</b>\n"
+        text += "<code>/noteset WebServer1 Currently running maintenance</code> → Add note to item\n"
+        text += "<code>/notedrop WebServer1</code> → Remove note from item\n"
+        text += "<i>💡 Notes are visible in /list and help track item status</i>\n\n"
 
         text += "🛡️ <b>Moderator Commands:</b>\n"
         text += "<code>/additem</code> - Add new item (interactive)\n"
         text += "<code>/additem &lt;name&gt; &lt;group&gt; &lt;type&gt; &lt;description&gt;</code> - Add item with inline args\n"
         text += "<code>/delitem &lt;item_id_or_name&gt;</code> - Delete an item\n"
+        text += "<code>/edititem &lt;item_id_or_name&gt; &lt;new_description&gt;</code> - Edit item description\n"
         text += "<code>/assign &lt;item_id_or_name&gt; &lt;username&gt;</code> - Force assign item to user\n"
         text += "<code>/purge &lt;item_id_or_name&gt;</code> - Force-free any item (removes from current owner)\n\n"
 
@@ -1677,6 +1765,76 @@ async def purge_item_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
             None,
             previous_owner,
         )
+
+
+@require_authorization
+async def edit_item_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Edit item description (moderator/admin only)"""
+    user_id = update.effective_user.id
+    username = update.effective_user.username
+
+    if not is_moderator_or_admin(user_id, username):
+        await update.message.reply_text("You don't have permission to use this command.")
+        return
+
+    if len(context.args) < 2:
+        await update.message.reply_text(
+            "Usage: /edititem <item_id_or_name> <new_description>\n\n"
+            "Example: /edititem WebServer1 Updated web server for production use"
+        )
+        return
+
+    # Find item by name or ID
+    item_id = bot.find_item_by_name_or_id(context.args[0])
+    if item_id is None:
+        await update.message.reply_text("Item not found. Please enter a valid item ID or name.")
+        return
+
+    # Get new description (join all remaining args)
+    new_description = " ".join(context.args[1:])
+
+    success, message = bot.edit_item_description(item_id, new_description)
+    await update.message.reply_text(message)
+
+
+@require_authorization
+async def note_set_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Set item note (any authorized user)"""
+    if len(context.args) < 2:
+        await update.message.reply_text(
+            "Usage: /noteset <item_id_or_name> <note_text>\n\n"
+            "Example: /noteset WebServer1 Currently running maintenance scripts"
+        )
+        return
+
+    # Find item by name or ID
+    item_id = bot.find_item_by_name_or_id(context.args[0])
+    if item_id is None:
+        await update.message.reply_text("Item not found. Please enter a valid item ID or name.")
+        return
+
+    # Get note text (join all remaining args)
+    note_text = " ".join(context.args[1:])
+
+    success, message = bot.set_item_note(item_id, note_text)
+    await update.message.reply_text(message)
+
+
+@require_authorization
+async def note_drop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Remove item note (any authorized user)"""
+    if not context.args:
+        await update.message.reply_text("Usage: /notedrop <item_id_or_name>\n\n" "Example: /notedrop WebServer1")
+        return
+
+    # Find item by name or ID
+    item_id = bot.find_item_by_name_or_id(context.args[0])
+    if item_id is None:
+        await update.message.reply_text("Item not found. Please enter a valid item ID or name.")
+        return
+
+    success, message = bot.drop_item_note(item_id)
+    await update.message.reply_text(message)
 
 
 @require_authorization
@@ -2596,6 +2754,9 @@ def main():
     application.add_handler(steal_item_handler)
     application.add_handler(CommandHandler("assign", assign_item_command))
     application.add_handler(CommandHandler("purge", purge_item_command))
+    application.add_handler(CommandHandler("edititem", edit_item_command))
+    application.add_handler(CommandHandler("noteset", note_set_command))
+    application.add_handler(CommandHandler("notedrop", note_drop_command))
     application.add_handler(CommandHandler("addmod", add_moderator_command))
     application.add_handler(CommandHandler("delmod", remove_moderator_command))
     application.add_handler(CommandHandler("listmod", list_moderators_command))
