@@ -1148,8 +1148,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += "<code>/deltype 1</code> → Delete unused type\n\n"
 
         text += "👑 <b>Admin Commands:</b>\n"
-        text += "<code>/addtype</code> - Add new item type (interactive)\n"
-        text += "<code>/addtype &lt;type_name&gt;</code> - Add type with inline arg\n"
+        text += "<code>/addtype [type_name]</code> - Add type with optional inline arg\n"
         text += "<code>/listtypes</code> - Show all available types\n"
         text += "<code>/deltype &lt;type_id&gt;</code> - Delete a type (if unused)\n\n"
 
