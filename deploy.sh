@@ -241,6 +241,92 @@ EOF
     print_success "Log rotation configured"
 }
 
+undeploy() {
+    print_status "Starting undeploy process..."
+    
+    # Check if we should create a backup before undeploying
+    if [ "$2" = "--backup" ] || [ "$2" = "-b" ]; then
+        print_status "Creating final backup before undeploying..."
+        if [ -d "$DEPLOYMENT_DIR/app" ]; then
+            cd "$DEPLOYMENT_DIR/app"
+            if [ -f "docker-compose.yml" ]; then
+                /usr/local/bin/manage-bots backup 2>/dev/null || print_warning "Backup failed"
+            fi
+        fi
+    fi
+    
+    # Stop and remove systemd service
+    print_status "Stopping and removing systemd service..."
+    systemctl stop item-bot.service 2>/dev/null || true
+    systemctl disable item-bot.service 2>/dev/null || true
+    rm -f /etc/systemd/system/item-bot.service
+    systemctl daemon-reload
+    
+    # Stop Docker services and clean up containers/images
+    print_status "Stopping Docker services..."
+    if [ -d "$DEPLOYMENT_DIR/app" ] && [ -f "$DEPLOYMENT_DIR/app/docker-compose.yml" ]; then
+        cd "$DEPLOYMENT_DIR/app"
+        docker-compose down 2>/dev/null || true
+        
+        # Remove project-specific images
+        print_status "Removing Docker images..."
+        docker images --format "table {{.Repository}}:{{.Tag}}" | grep "item-bot" | xargs -r docker rmi -f 2>/dev/null || true
+    fi
+    
+    # Remove management script symlink
+    print_status "Removing management scripts..."
+    rm -f /usr/local/bin/manage-bots
+    
+    # Remove logrotate configuration
+    print_status "Removing log rotation configuration..."
+    rm -f /etc/logrotate.d/item-bot
+    
+    # Delete deployment directory (preserve backups if requested)
+    if [ "$2" = "--keep-backups" ] || [ "$2" = "-k" ]; then
+        print_status "Preserving backups, moving to /tmp..."
+        if [ -d "$DEPLOYMENT_DIR/backups" ]; then
+            BACKUP_PRESERVE_DIR="/tmp/item-bot-backups-$(date +%Y%m%d_%H%M%S)"
+            mv "$DEPLOYMENT_DIR/backups" "$BACKUP_PRESERVE_DIR"
+            print_success "Backups preserved at: $BACKUP_PRESERVE_DIR"
+        fi
+    fi
+    
+    if [ -d "$DEPLOYMENT_DIR" ]; then
+        print_status "Removing deployment directory..."
+        rm -rf "$DEPLOYMENT_DIR"
+    fi
+    
+    # Remove the service user
+    print_status "Removing service user..."
+    if id "$SERVICE_USER" &>/dev/null; then
+        userdel -r "$SERVICE_USER" 2>/dev/null || userdel "$SERVICE_USER" 2>/dev/null || print_warning "Could not remove user $SERVICE_USER"
+    else
+        print_warning "User $SERVICE_USER does not exist"
+    fi
+    
+    # Optional: Clean up Docker system (commented out by default for safety)
+    # Uncomment if you want to remove all unused Docker resources
+    # print_status "Cleaning up Docker system..."
+    # docker system prune -a -f
+    
+    print_success "Undeploy completed successfully!"
+    echo ""
+    print_status "The following have been removed:"
+    echo "  - Systemd service (item-bot.service)"
+    echo "  - Docker containers and images"
+    echo "  - Deployment directory ($DEPLOYMENT_DIR)"
+    echo "  - Service user ($SERVICE_USER)"
+    echo "  - Management scripts and configurations"
+    echo ""
+    if [ "$2" = "--keep-backups" ] || [ "$2" = "-k" ]; then
+        print_status "Backups were preserved and moved to /tmp"
+    elif [ "$2" = "--backup" ] || [ "$2" = "-b" ]; then
+        print_status "Final backup was created before removal"
+    else
+        print_warning "No backup was created. Use --backup flag next time to create a final backup"
+    fi
+}
+
 print_completion_info() {
     print_success "Deployment completed successfully!"
     echo ""
@@ -264,22 +350,59 @@ print_completion_info() {
     echo ""
     print_status "Systemd service:"
     echo "   systemctl {start|stop|status} item-bot"
+    echo ""
+    print_status "To undeploy:"
+    echo "   sudo $0 undeploy [--backup|-b] [--keep-backups|-k]"
+}
+
+print_usage() {
+    echo "Usage: $0 [deploy|undeploy] [options]"
+    echo ""
+    echo "Commands:"
+    echo "  deploy        Deploy the item bot system (default)"
+    echo "  undeploy      Remove the item bot system completely"
+    echo ""
+    echo "Undeploy options:"
+    echo "  --backup, -b        Create a final backup before undeploying"
+    echo "  --keep-backups, -k  Preserve existing backups in /tmp"
+    echo ""
+    echo "Examples:"
+    echo "  $0                     # Deploy the system"
+    echo "  $0 deploy              # Deploy the system"
+    echo "  $0 undeploy            # Remove everything"
+    echo "  $0 undeploy --backup   # Create backup then remove everything"
+    echo "  $0 undeploy --keep-backups  # Remove everything but save backups"
 }
 
 main() {
-    print_status "Starting Item Bot deployment..."
-    
-    check_root
-    install_dependencies
-    create_user
-    setup_directories
-    copy_files
-    create_management_scripts
-    create_systemd_service
-    setup_logrotate
-    
-    print_completion_info
+    case "$1" in
+        undeploy)
+            check_root
+            undeploy "$@"
+            ;;
+        deploy|"")
+            print_status "Starting Item Bot deployment..."
+            check_root
+            install_dependencies
+            create_user
+            setup_directories
+            copy_files
+            create_management_scripts
+            create_systemd_service
+            setup_logrotate
+            print_completion_info
+            ;;
+        --help|-h)
+            print_usage
+            ;;
+        *)
+            print_error "Unknown command: $1"
+            print_usage
+            exit 1
+            ;;
+    esac
 }
 
 # Run main function
 main "$@"
+
