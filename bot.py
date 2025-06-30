@@ -1259,7 +1259,8 @@ async def add_item_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Try as integer (type ID)
             type_id = int(type_arg)
             if not any(t[0] == type_id for t in types):
-                await update.message.reply_text(f"Invalid type ID: {type_id}")
+                available_types = "\n".join([f"ID {t[0]}: {t[1]}" for t in types])
+                await update.message.reply_text(f"Type ID {type_id} not found. Available types:\n{available_types}")
                 return ConversationHandler.END
         except ValueError:
             # Try as string (type name)
@@ -1270,9 +1271,14 @@ async def add_item_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     break
 
             if type_id is None:
-                await update.message.reply_text(f"Invalid type name: '{type_arg}'. Use type ID or exact type name.")
+                available_types = ", ".join([f"'{t[1]}'" for t in types])
+                await update.message.reply_text(
+                    f"Type '{type_arg}' not found. Available types: {available_types}\n"
+                    f"Use /addtype {type_arg} to create it first, or use /listtypes to see all types."
+                )
                 return ConversationHandler.END
 
+        
         success = bot.add_item(name, group, type_id, description)
 
         if success:
@@ -1316,7 +1322,8 @@ async def add_item_finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Try as integer (type ID)
         type_id = int(type_id_str)
         if not any(t[0] == type_id for t in types):
-            await update.message.reply_text(f"Invalid type ID: {type_id}")
+            available_types = "\n".join([f"ID {t[0]}: {t[1]}" for t in types])
+            await update.message.reply_text(f"Type ID {type_id} not found. Available types:\n{available_types}")
             return ADDING_ITEM
     except ValueError:
         # Try as string (type name)
@@ -1327,9 +1334,14 @@ async def add_item_finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 break
 
         if type_id is None:
-            await update.message.reply_text(f"Invalid type name: '{type_id_str}'. Use type ID or exact type name.")
+            available_types = ", ".join([f"'{t[1]}'" for t in types])
+            await update.message.reply_text(
+                f"Type '{type_id_str}' not found. Available types: {available_types}\n"
+                f"Use /addtype {type_id_str} to create it first, or use /listtypes to see all types."
+            )
             return ADDING_ITEM
 
+    logger.info(f"Adding item: {name}, {group}, {type_id}, {description}")
     success = bot.add_item(name, group, type_id, description)
 
     if success:
