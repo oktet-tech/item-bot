@@ -1362,11 +1362,14 @@ async def add_type_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Check if type name provided as argument
     if context.args:
         type_name = " ".join(context.args).strip()
+        logger.info(f"Admin attempting to add type: '{type_name}'")
         success = bot.add_type(type_name)
 
         if success:
+            logger.info(f"Type '{type_name}' added successfully")
             await update.message.reply_text(f"Type '{type_name}' added successfully!")
         else:
+            logger.warning(f"Failed to add type '{type_name}' - might already exist")
             await update.message.reply_text("Failed to add type. Name might already exist.")
 
         return ConversationHandler.END
