@@ -1014,7 +1014,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text += "• Free items promptly when you're done\n"
     text += "• Use <code>/list owner yourusername</code> to see your items\n\n"
 
-    text += "❓ Need help? Use <code>/help</code> for detailed examples!"
+    text += "❓ Need help? Use <code>/help</code> for detailed examples!\n\n"
+    
+    # Debug info
+    text += f"🔧 <b>Debug Info:</b>\n"
+    text += f"Your ID: <code>{user_id}</code>\n"
+    text += f"Your username: <code>{username or 'None'}</code>\n"
+    text += f"Admin: {'✅' if is_admin(user_id) else '❌'}\n"
+    text += f"Moderator: {'✅' if is_moderator_or_admin(user_id, username) else '❌'}\n"
+    text += f"Authorized: {'✅' if is_user_authorized(user_id, username) else '❌'}"
 
     await update.message.reply_html(text)
 
