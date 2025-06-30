@@ -980,7 +980,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if is_moderator_or_admin(user_id, username):
         text += "🛡️ <b>Your Moderator Commands:</b>\n"
-        text += "• <code>/additem</code> - Add a new item\n"
+        text += "• <code>/additem &lt;name&gt; &lt;group&gt; &lt;type&gt; &lt;description&gt;</code> - Add a new item\n"
         text += "• <code>/delitem</code> - Delete an item\n"
         text += "• <code>/edititem</code> - Edit item description\n"
         text += "• <code>/assign</code> - Assign item to user\n"
@@ -1100,8 +1100,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += "As a moderator, you can manage items and assignments:\n\n"
 
         text += "<b>Adding Items:</b>\n"
-        text += "<code>/additem</code> → Enter: <code>WebServer1 | production | Server | Main web server</code>\n"
-        text += "Format: <code>name | group | type_id_or_name | description</code>\n\n"
+        text += "<code>/additem WebServer1 production Server Main web server</code>\n"
+        text += "Format: <code>/additem &lt;name&gt; &lt;group&gt; &lt;type&gt; &lt;multi-word description&gt;</code>\n\n"
 
         text += "<b>Managing Items:</b>\n"
         text += "<code>/delitem WebServer1</code> → Delete an item\n"
@@ -1115,8 +1115,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += "<i>💡 Notes are visible in /list and help track item status</i>\n\n"
 
         text += "🛡️ <b>Moderator Commands:</b>\n"
-        text += "<code>/additem</code> - Add new item (interactive)\n"
-        text += "<code>/additem &lt;name&gt; &lt;group&gt; &lt;type&gt; &lt;description&gt;</code> - Add item with inline args\n"
+        text += "<code>/additem &lt;name&gt; &lt;group&gt; &lt;type&gt; &lt;multi-word description&gt;</code> - Add new item\n"
         text += "<code>/delitem &lt;item_id_or_name&gt;</code> - Delete an item\n"
         text += "<code>/edititem &lt;item_id_or_name&gt; &lt;new_description&gt;</code> - Edit item description\n"
         text += "<code>/assign &lt;item_id_or_name&gt; &lt;username&gt;</code> - Force assign item to user\n"
@@ -1237,104 +1236,51 @@ async def list_items_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 # Admin command handlers
 @require_authorization
-async def add_item_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start adding a new item"""
+async def add_item_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Add a new item with inline arguments"""
     user_id = update.effective_user.id
     username = update.effective_user.username
 
     if not is_moderator_or_admin(user_id, username):
         await update.message.reply_text("You don't have permission to use this command.")
-        return ConversationHandler.END
+        return
 
     types = bot.list_types()
     if not types:
         await update.message.reply_text("No types available. Please add types first using /addtype")
-        return ConversationHandler.END
+        return
 
     # Check if item details provided as arguments
-    if context.args and len(context.args) >= 4:
-        # Parse inline arguments: /additem name group type description
-        name = context.args[0]
-        group = context.args[1]
-        type_arg = context.args[2]
-        description = " ".join(context.args[3:])
+    if not context.args or len(context.args) < 4:
+        available_types = ", ".join([f"'{t[1]}'" for t in types])
+        await update.message.reply_text(
+            f"❌ Invalid usage. Command format:\n\n"
+            f"<code>/additem &lt;name&gt; &lt;group&gt; &lt;type&gt; &lt;multi-word description&gt;</code>\n\n"
+            f"Available types: {available_types}\n\n"
+            f"Example: <code>/additem WebServer1 production Server Main production web server</code>",
+            parse_mode='HTML'
+        )
+        return
 
-        # Try to parse type as integer first, then as string (type name)
-        type_id = None
+    # Parse inline arguments: /additem name group type description
+    name = context.args[0]
+    group = context.args[1]
+    type_arg = context.args[2]
+    description = " ".join(context.args[3:])
 
-        try:
-            # Try as integer (type ID)
-            type_id = int(type_arg)
-            if not any(t[0] == type_id for t in types):
-                available_types = "\n".join([f"ID {t[0]}: {t[1]}" for t in types])
-                await update.message.reply_text(f"Type ID {type_id} not found. Available types:\n{available_types}")
-                return ConversationHandler.END
-        except ValueError:
-            # Try as string (type name)
-            type_name_lower = type_arg.lower()
-            for t_id, t_name in types:
-                if t_name.lower() == type_name_lower:
-                    type_id = t_id
-                    break
-
-            if type_id is None:
-                available_types = ", ".join([f"'{t[1]}'" for t in types])
-                await update.message.reply_text(
-                    f"Type '{type_arg}' not found. Available types: {available_types}\n"
-                    f"Use /addtype {type_arg} to create it first, or use /listtypes to see all types."
-                )
-                return ConversationHandler.END
-
-        
-        success = bot.add_item(name, group, type_id, description)
-
-        if success:
-            await update.message.reply_text(f"Item '{name}' added successfully!")
-        else:
-            await update.message.reply_text("Failed to add item. Name might already exist.")
-
-        return ConversationHandler.END
-
-    # Store types in context for later use
-    context.user_data["types"] = types
-
-    await update.message.reply_text(
-        "Let's add a new item. Please send the details in this format:\n"
-        "name | group | type_id | description\n\n"
-        "Available types:\n"
-        + "\n".join([f"{t_id}: {t_name}" for t_id, t_name in types])
-        + "\n\nExample: Server1 | production | 1 | Main production server"
-    )
-
-    return ADDING_ITEM
-
-
-@require_authorization
-async def add_item_finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Finish adding a new item"""
-    text = update.message.text.strip()
-    parts = [p.strip() for p in text.split("|")]
-
-    if len(parts) != 4:
-        await update.message.reply_text("Invalid format. Please use: name | group | type_id_or_name | description")
-        return ADDING_ITEM
-
-    name, group, type_id_str, description = parts
-
-    # Try to parse as integer first, then as string (type name)
+    # Try to parse type as integer first, then as string (type name)
     type_id = None
-    types = context.user_data.get("types", [])
 
     try:
         # Try as integer (type ID)
-        type_id = int(type_id_str)
+        type_id = int(type_arg)
         if not any(t[0] == type_id for t in types):
             available_types = "\n".join([f"ID {t[0]}: {t[1]}" for t in types])
             await update.message.reply_text(f"Type ID {type_id} not found. Available types:\n{available_types}")
-            return ADDING_ITEM
+            return
     except ValueError:
         # Try as string (type name)
-        type_name_lower = type_id_str.lower()
+        type_name_lower = type_arg.lower()
         for t_id, t_name in types:
             if t_name.lower() == type_name_lower:
                 type_id = t_id
@@ -1343,12 +1289,11 @@ async def add_item_finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if type_id is None:
             available_types = ", ".join([f"'{t[1]}'" for t in types])
             await update.message.reply_text(
-                f"Type '{type_id_str}' not found. Available types: {available_types}\n"
-                f"Use /addtype {type_id_str} to create it first, or use /listtypes to see all types."
+                f"Type '{type_arg}' not found. Available types: {available_types}\n"
+                f"Use /addtype {type_arg} to create it first, or use /listtypes to see all types."
             )
-            return ADDING_ITEM
+            return
 
-    logger.info(f"Adding item: {name}, {group}, {type_id}, {description}")
     success = bot.add_item(name, group, type_id, description)
 
     if success:
@@ -1356,7 +1301,8 @@ async def add_item_finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("Failed to add item. Name might already exist.")
 
-    return ConversationHandler.END
+
+
 
 
 @require_authorization
@@ -2729,13 +2675,6 @@ def main():
     )
 
     # Conversation handlers
-    add_item_handler = ConversationHandler(
-        entry_points=[CommandHandler("additem", add_item_start)],
-        states={
-            ADDING_ITEM: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_item_finish)],
-        },
-        fallbacks=[CommandHandler("cancel", cancel)],
-    )
 
     add_type_handler = ConversationHandler(
         entry_points=[CommandHandler("addtype", add_type_start)],
@@ -2778,7 +2717,7 @@ def main():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("list", list_items_command))
-    application.add_handler(add_item_handler)
+    application.add_handler(CommandHandler("additem", add_item_command))
     application.add_handler(add_type_handler)
     application.add_handler(CommandHandler("listtypes", list_types_command))
     application.add_handler(CommandHandler("deltype", delete_type_command))
