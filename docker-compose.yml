@@ -13,7 +13,6 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - COMPANY_BOT_TOKEN=${COMPANY_BOT_TOKEN}
       - COMPANY_ADMIN_1=${COMPANY_ADMIN_1}
-      - COMPANY_ADMIN_2=${COMPANY_ADMIN_2}
     volumes:
       - ./config/company-config.py:/app/config.py:ro
       - company-bot-data:/app/data
@@ -24,64 +23,10 @@ services:
       - "bot.instance=company"
       - "bot.type=item-manager"
 
-  # Example bot instance 2 - Dev Team Bot
-  dev-bot:
-    build: .
-    container_name: item-bot-dev
-    restart: unless-stopped
-    environment:
-      - BOT_NAME=dev-bot
-      - DATABASE_PATH=/app/data/dev-resources.db
-      - LOG_FILE=/app/logs/dev-bot.log
-      - LOG_LEVEL=${LOG_LEVEL:-DEBUG}
-      - DEV_BOT_TOKEN=${DEV_BOT_TOKEN}
-      - DEV_ADMIN_1=${DEV_ADMIN_1}
-      - DEV_ADMIN_2=${DEV_ADMIN_2}
-    volumes:
-      - ./config/dev-config.py:/app/config.py:ro
-      - dev-bot-data:/app/data
-      - dev-bot-logs:/app/logs
-    networks:
-      - bot-network
-    labels:
-      - "bot.instance=dev"
-      - "bot.type=item-manager"
-
-  # Example bot instance 3 - QA Team Bot
-  qa-bot:
-    build: .
-    container_name: item-bot-qa
-    restart: unless-stopped
-    environment:
-      - BOT_NAME=qa-bot
-      - DATABASE_PATH=/app/data/qa-resources.db
-      - LOG_FILE=/app/logs/qa-bot.log
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - QA_BOT_TOKEN=${QA_BOT_TOKEN}
-      - QA_ADMIN_1=${QA_ADMIN_1}
-      - QA_ADMIN_2=${QA_ADMIN_2}
-    volumes:
-      - ./config/qa-config.py:/app/config.py:ro
-      - qa-bot-data:/app/data
-      - qa-bot-logs:/app/logs
-    networks:
-      - bot-network
-    labels:
-      - "bot.instance=qa"
-      - "bot.type=item-manager"
-
 volumes:
   company-bot-data:
     driver: local
   company-bot-logs:
-    driver: local
-  dev-bot-data:
-    driver: local
-  dev-bot-logs:
-    driver: local
-  qa-bot-data:
-    driver: local
-  qa-bot-logs:
     driver: local
 
 networks:
