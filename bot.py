@@ -2695,8 +2695,16 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     """Start the bot"""
-    # Create the Application
-    application = Application.builder().token(BOT_TOKEN).build()
+    # Create the Application with timeout configuration
+    application = (
+        Application.builder()
+        .token(BOT_TOKEN)
+        .read_timeout(30)
+        .write_timeout(30)
+        .connect_timeout(30)
+        .pool_timeout(30)
+        .build()
+    )
 
     # Conversation handlers
     add_item_handler = ConversationHandler(
@@ -2775,8 +2783,13 @@ def main():
     application.add_handler(CommandHandler("dbdump", dump_database_command))
     application.add_handler(batch_handler)
 
-    # Run the bot
-    application.run_polling()
+    # Run the bot with improved error handling
+    try:
+        logger.info("Starting bot...")
+        application.run_polling(drop_pending_updates=True)
+    except Exception as e:
+        logger.error(f"Bot crashed: {e}")
+        raise
 
 
 if __name__ == "__main__":
