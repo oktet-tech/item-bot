@@ -4,14 +4,15 @@ Bot Auto-Restart Watcher
 This script monitors bot.py for changes and automatically restarts it.
 """
 
-import sys
-import time
-import signal
-import subprocess
 import argparse
 from pathlib import Path
-from watchdog.observers import Observer
+import signal
+import subprocess
+import sys
+import time
+
 from watchdog.events import FileSystemEventHandler
+from watchdog.observers import Observer
 
 
 class BotRestartHandler(FileSystemEventHandler):
@@ -26,8 +27,8 @@ class BotRestartHandler(FileSystemEventHandler):
             return
 
         # Check if the modified file is our bot script
-        if event.src_path.endswith("bot.py"):
-            print(f"\n🔄 Detected change in {event.src_path}")
+        if event.src_path.endswith('bot.py'):
+            print(f'\n🔄 Detected change in {event.src_path}')
             if not self.restart_pending:
                 self.restart_pending = True
                 # Small delay to avoid multiple rapid restarts
@@ -37,7 +38,7 @@ class BotRestartHandler(FileSystemEventHandler):
 
     def restart_bot(self):
         if self.bot_process and self.bot_process.poll() is None:
-            print("🛑 Stopping bot to restart...")
+            print('🛑 Stopping bot to restart...')
             # Gracefully terminate the bot
             self.bot_process.terminate()
             try:
@@ -47,19 +48,19 @@ class BotRestartHandler(FileSystemEventHandler):
                 self.bot_process.kill()
                 self.bot_process.wait()
             # Wait an additional 3 seconds to ensure proper termination
-            print("⏳ Waiting 3 seconds to ensure proper termination...")
+            print('⏳ Waiting 3 seconds to ensure proper termination...')
             time.sleep(3)
         elif self.bot_process is None:
-            print("🔄 Bot was already stopped, starting fresh...")
+            print('🔄 Bot was already stopped, starting fresh...')
         else:
-            print("🔄 Bot was already stopped, restarting...")
+            print('🔄 Bot was already stopped, restarting...')
 
-        print("🚀 Starting bot...")
+        print('🚀 Starting bot...')
         if self.debug_mode:
-            self.bot_process = subprocess.Popen([sys.executable, self.bot_script, "--debug"])
+            self.bot_process = subprocess.Popen([sys.executable, self.bot_script, '--debug'])
         else:
             self.bot_process = subprocess.Popen([sys.executable, self.bot_script])
-        print(f"✅ Bot started with PID {self.bot_process.pid}")
+        print(f'✅ Bot started with PID {self.bot_process.pid}')
 
     def set_process(self, process):
         self.bot_process = process
@@ -73,25 +74,25 @@ def main():
 
     # Get the directory where this script is located
     script_dir = Path(__file__).parent.absolute()
-    bot_script = script_dir / "bot.py"
+    bot_script = script_dir / 'bot.py'
 
     if not bot_script.exists():
-        print(f"❌ Error: {bot_script} not found!")
+        print(f'❌ Error: {bot_script} not found!')
         sys.exit(1)
 
-    print(f"👀 Watching for changes in {script_dir}")
-    print(f"🤖 Bot script: {bot_script}")
+    print(f'👀 Watching for changes in {script_dir}')
+    print(f'🤖 Bot script: {bot_script}')
     if args.debug:
-        print("🔍 Debug mode enabled")
-    print("Press Ctrl+C to stop the watcher\n")
+        print('🔍 Debug mode enabled')
+    print('Press Ctrl+C to stop the watcher\n')
 
     # Start the bot initially
-    print("🚀 Starting bot for the first time...")
+    print('🚀 Starting bot for the first time...')
     if args.debug:
-        bot_process = subprocess.Popen([sys.executable, str(bot_script), "--debug"])
+        bot_process = subprocess.Popen([sys.executable, str(bot_script), '--debug'])
     else:
         bot_process = subprocess.Popen([sys.executable, str(bot_script)])
-    print(f"✅ Bot started with PID {bot_process.pid}\n")
+    print(f'✅ Bot started with PID {bot_process.pid}\n')
 
     # Set up file system watcher
     event_handler = BotRestartHandler(str(bot_script), bot_process, args.debug)
@@ -99,17 +100,17 @@ def main():
     observer.schedule(event_handler, str(script_dir), recursive=False)
 
     def signal_handler(signum, frame):
-        print("\n🛑 Shutting down watcher...")
+        print('\n🛑 Shutting down watcher...')
         observer.stop()
         if bot_process and bot_process.poll() is None:
-            print("🛑 Stopping bot...")
+            print('🛑 Stopping bot...')
             bot_process.terminate()
             try:
                 bot_process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 bot_process.kill()
                 bot_process.wait()
-        print("👋 Goodbye!")
+        print('👋 Goodbye!')
         sys.exit(0)
 
     # Handle Ctrl+C gracefully
@@ -124,7 +125,7 @@ def main():
             time.sleep(1)
             # Check if bot process died unexpectedly (but don't restart)
             if bot_process and bot_process.poll() is not None:
-                print("⚠️  Bot process died unexpectedly. Waiting for file changes to restart...")
+                print('⚠️  Bot process died unexpectedly. Waiting for file changes to restart...')
                 # Set bot_process to None so we know it's dead
                 bot_process = None
                 event_handler.set_process(None)
@@ -135,5 +136,5 @@ def main():
         observer.join()
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
