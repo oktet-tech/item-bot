@@ -2,7 +2,27 @@
 
 # Item Bot Startup Script
 
-echo "🤖 Starting Item Bot..."
+# Parse command line arguments
+DEBUG_MODE=false
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --debug)
+            DEBUG_MODE=true
+            shift
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Usage: $0 [--debug]"
+            exit 1
+            ;;
+    esac
+done
+
+if [ "$DEBUG_MODE" = true ]; then
+    echo "🤖 Starting Item Bot in DEBUG mode..."
+else
+    echo "🤖 Starting Item Bot..."
+fi
 
 # Check if Poetry is installed
 if ! command -v poetry &> /dev/null; then
@@ -27,4 +47,8 @@ fi
 
 # Run the bot
 echo "🚀 Launching bot..."
-poetry run python bot.py 
+if [ "$DEBUG_MODE" = true ]; then
+    poetry run python bot.py --debug
+else
+    poetry run python bot.py
+fi 

@@ -2,7 +2,27 @@
 
 # Item Bot Development Script with Auto-restart
 
-echo "🔧 Starting Item Bot in Development Mode..."
+# Parse command line arguments
+DEBUG_MODE=false
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --debug)
+            DEBUG_MODE=true
+            shift
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Usage: $0 [--debug]"
+            exit 1
+            ;;
+    esac
+done
+
+if [ "$DEBUG_MODE" = true ]; then
+    echo "🔧 Starting Item Bot in Development Mode with DEBUG logging..."
+else
+    echo "🔧 Starting Item Bot in Development Mode..."
+fi
 
 # Check if Poetry is installed
 if ! command -v poetry &> /dev/null; then
@@ -29,4 +49,8 @@ fi
 echo "🚀 Launching bot with auto-restart (development mode)..."
 echo "📝 The bot will automatically restart when you modify bot.py"
 echo "🛑 Press Ctrl+C to stop"
-poetry run python bot_watcher.py 
+if [ "$DEBUG_MODE" = true ]; then
+    poetry run python bot_watcher.py --debug
+else
+    poetry run python bot_watcher.py
+fi 

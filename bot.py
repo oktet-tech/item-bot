@@ -6,6 +6,7 @@ Telegram Bot for Resource Allocation Management
 import sqlite3
 import logging
 import sys
+import argparse
 from datetime import datetime
 from typing import Optional, List, Dict, Tuple
 from telegram import Update
@@ -907,18 +908,34 @@ def log_command(func):
     """Decorator to log all command usage"""
     
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        user = update.effective_user
-        command = update.message.text.strip()
-        chat_type = update.effective_chat.type if update.effective_chat else 'unknown'
-        chat_id = update.effective_chat.id if update.effective_chat else 'unknown'
-        chat_title = getattr(update.effective_chat, 'title', 'Private Chat') if update.effective_chat else 'Unknown'
-        
-        # Log command details
-        logger.info(
-            f"COMMAND: {command} | "
-            f"User: {user.username or 'No username'} (ID: {user.id}) | "
-            f"Chat: {chat_title} ({chat_type}, ID: {chat_id})"
-        )
+        try:
+            # Safely extract information with fallbacks
+            user = update.effective_user
+            user_info = f"{user.username or 'No username'} (ID: {user.id})" if user else "Unknown user"
+            
+            command = update.message.text.strip() if update.message and update.message.text else "No text"
+            
+            chat = update.effective_chat
+            if chat:
+                chat_type = chat.type
+                chat_id = chat.id
+                chat_title = getattr(chat, 'title', 'Private Chat')
+            else:
+                chat_type = 'unknown'
+                chat_id = 'unknown'
+                chat_title = 'Unknown'
+            
+            # Log command details
+            logger.info(
+                f"COMMAND: {command} | "
+                f"User: {user_info} | "
+                f"Chat: {chat_title} ({chat_type}, ID: {chat_id})"
+            )
+            
+        except Exception as e:
+            # Log the error but don't prevent command execution
+            logger.error(f"Error in log_command decorator: {e}")
+            logger.info(f"COMMAND: {update.message.text if update.message and update.message.text else 'Unknown'} | User: Unknown | Chat: Unknown")
         
         return await func(update, context)
     
@@ -2726,6 +2743,28 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     """Start the bot"""
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Telegram Bot for Resource Allocation Management')
+    parser.add_argument('--debug', action='store_true', help='Enable debug logging')
+    args = parser.parse_args()
+
+    # Configure logging based on debug flag
+    if args.debug:
+        log_level = logging.DEBUG
+        print("🔍 Debug logging enabled")
+        # Reconfigure logging with debug level
+        if LOG_FILE:
+            logging.basicConfig(
+                format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+                level=log_level,
+                handlers=[logging.FileHandler(LOG_FILE), logging.StreamHandler()],
+            )
+        else:
+            logging.basicConfig(
+                format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+                level=log_level
+            )
+
     # Create the Application with timeout configuration
     application = (
         Application.builder()
@@ -2806,6 +2845,12 @@ def main():
     application.add_handler(CommandHandler("dbwipe", wipe_database_command))
     application.add_handler(CommandHandler("dbdump", dump_database_command))
     application.add_handler(batch_handler)
+
+    # Set debug logging for telegram library only if debug flag is enabled
+    if args.debug:
+        logging.getLogger("telegram").setLevel(logging.DEBUG)
+        logging.getLogger("telegram.vendor.ptb_urllib3.urllib3").setLevel(logging.DEBUG)
+        logging.getLogger("urllib3").setLevel(logging.DEBUG)
 
     # Run the bot with improved error handling
     try:

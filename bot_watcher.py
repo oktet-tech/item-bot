@@ -8,16 +8,18 @@ import sys
 import time
 import signal
 import subprocess
+import argparse
 from pathlib import Path
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
 
 class BotRestartHandler(FileSystemEventHandler):
-    def __init__(self, bot_script, bot_process=None):
+    def __init__(self, bot_script, bot_process=None, debug_mode=False):
         self.bot_script = bot_script
         self.bot_process = bot_process
         self.restart_pending = False
+        self.debug_mode = debug_mode
 
     def on_modified(self, event):
         if event.is_directory:
@@ -53,7 +55,10 @@ class BotRestartHandler(FileSystemEventHandler):
             print("🔄 Bot was already stopped, restarting...")
 
         print("🚀 Starting bot...")
-        self.bot_process = subprocess.Popen([sys.executable, self.bot_script])
+        if self.debug_mode:
+            self.bot_process = subprocess.Popen([sys.executable, self.bot_script, "--debug"])
+        else:
+            self.bot_process = subprocess.Popen([sys.executable, self.bot_script])
         print(f"✅ Bot started with PID {self.bot_process.pid}")
 
     def set_process(self, process):
@@ -61,6 +66,11 @@ class BotRestartHandler(FileSystemEventHandler):
 
 
 def main():
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Bot Auto-Restart Watcher')
+    parser.add_argument('--debug', action='store_true', help='Enable debug mode for the bot')
+    args = parser.parse_args()
+
     # Get the directory where this script is located
     script_dir = Path(__file__).parent.absolute()
     bot_script = script_dir / "bot.py"
@@ -71,15 +81,20 @@ def main():
 
     print(f"👀 Watching for changes in {script_dir}")
     print(f"🤖 Bot script: {bot_script}")
+    if args.debug:
+        print("🔍 Debug mode enabled")
     print("Press Ctrl+C to stop the watcher\n")
 
     # Start the bot initially
     print("🚀 Starting bot for the first time...")
-    bot_process = subprocess.Popen([sys.executable, str(bot_script)])
+    if args.debug:
+        bot_process = subprocess.Popen([sys.executable, str(bot_script), "--debug"])
+    else:
+        bot_process = subprocess.Popen([sys.executable, str(bot_script)])
     print(f"✅ Bot started with PID {bot_process.pid}\n")
 
     # Set up file system watcher
-    event_handler = BotRestartHandler(str(bot_script), bot_process)
+    event_handler = BotRestartHandler(str(bot_script), bot_process, args.debug)
     observer = Observer()
     observer.schedule(event_handler, str(script_dir), recursive=False)
 
