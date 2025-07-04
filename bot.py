@@ -1006,17 +1006,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text += "🚀 <b>Quick Start:</b>\n"
     text += "• <code>/list</code> - See all available items\n"
-    text += "• <code>/take ItemName</code> - Take a free item\n"
+    text += "• <code>/take ItemName [purpose]</code> - Take a free item\n"
     text += "• <code>/free ItemName</code> - Release your item\n"
     text += "• <code>/help</code> - Get detailed help & examples\n\n"
 
     text += "🔧 <b>All User Commands:</b>\n"
     text += "• <code>/list</code> - List all items (with filters)\n"
-    text += "• <code>/take</code> - Take a free item\n"
-    text += "• <code>/free</code> - Free an item you own\n"
-    text += "• <code>/steal</code> - Steal an item (urgent situations)\n"
-    text += "• <code>/noteset</code> - Add note to any item\n"
-    text += "• <code>/notedrop</code> - Remove note from any item\n\n"
+    text += "• <code>/take &lt;item&gt; [purpose]</code> - Take a free item\n"
+    text += "• <code>/free &lt;item&gt;</code> - Free an item you own\n"
+    text += "• <code>/steal &lt;item&gt; [purpose]</code> - Steal an item (urgent situations)\n"
+    text += "• <code>/noteset &lt;item&gt; &lt;note&gt;</code> - Add note to any item\n"
+    text += "• <code>/notedrop &lt;item&gt;</code> - Remove note from any item\n\n"
 
     if is_moderator_or_admin(user_id, username):
         text += "🛡️ <b>Your Moderator Commands:</b>\n"
@@ -1050,9 +1050,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += "• <code>/dbwipe</code> - Reset database (dangerous!)\n\n"
 
     text += "💡 <b>Pro Tips:</b>\n"
-    text += "• Always specify a purpose when taking items\n"
+    text += "• Providing a purpose when taking/stealing items is recommended\n"
     text += "• Free items promptly when you're done\n"
-    text += "• Use <code>/list owner yourusername</code> to see your items\n\n"
+    text += "• Use <code>/list owner yourusername</code> to see your items\n"
+    text += "• Use <code>/take</code> or <code>/steal</code> without args to see available items\n\n"
 
     text += "❓ Need help? Use <code>/help</code> for detailed examples!\n\n"
     
@@ -1105,7 +1106,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         text += "<b>2. Take a free item:</b>\n"
         text += "<code>/take WebServer1 debugging issue</code> → Take with purpose immediately\n"
-        text += "<code>/take WebServer1</code> → Bot asks for purpose\n"
+        text += "<code>/take WebServer1</code> → Take without specific purpose\n"
+        text += "<code>/take</code> → Shows available free items\n"
         text += "✅ Result: WebServer1 is now owned by you\n\n"
 
         text += "<b>3. Free your item when done:</b>\n"
@@ -1113,23 +1115,26 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += "✅ Result: WebServer1 is now available for others\n\n"
 
         text += "<b>4. Steal an item (urgent situations only):</b>\n"
-        text += "<code>/steal</code> → Shows owned items → Enter: <code>iPhone15 critical production bug</code>\n"
+        text += "<code>/steal iPhone15 critical production bug</code> → Steal with purpose immediately\n"
+        text += "<code>/steal iPhone15</code> → Steal without specific purpose\n"
+        text += "<code>/steal</code> → Shows items you can steal\n"
         text += "⚠️ Result: You steal iPhone15 from current owner\n\n"
 
         text += "🔧 <b>User Commands:</b>\n"
         text += "<code>/list</code> - List all items (add filters: group, type, owner)\n"
         text += "<code>/take &lt;item_name&gt; [purpose]</code> - Take a free item\n"
-        text += "<code>/free &lt;item_id&gt;</code> - Free an item you own\n"
-        text += "<code>/steal</code> - Steal an item from someone (use responsibly!)\n"
+        text += "<code>/free &lt;item_name&gt;</code> - Free an item you own\n"
+        text += "<code>/steal &lt;item_name&gt; [purpose]</code> - Steal an item from someone (use responsibly!)\n"
         text += "<code>/noteset &lt;item_name&gt; &lt;note&gt;</code> - Add note to any item\n"
         text += "<code>/notedrop &lt;item_name&gt;</code> - Remove note from any item\n\n"
 
         text += "💡 <b>Tips:</b>\n"
-        text += "• Always provide a purpose when taking/stealing items\n"
+        text += "• Providing a purpose when taking/stealing items is recommended\n"
         text += "• Free items promptly when done\n"
         text += "• Use groups to organize items (production, testing, dev)\n"
         text += "• Stealing should be used only for urgent situations\n"
-        text += "• Check <code>/list owner yourusername</code> to see your items\n\n"
+        text += "• Check <code>/list owner yourusername</code> to see your items\n"
+        text += "• Use <code>/take</code> or <code>/steal</code> without arguments to see available items\n\n"
 
     # Moderator section
     if show_mod:
@@ -1463,12 +1468,23 @@ async def delete_item_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 @require_authorization
 @log_command
 async def take_item_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Take an item with new syntax: /take <item_name> [purpose]"""
+    """Take an item with syntax: /take <item_name> [purpose]"""
     args = context.args
 
-    # If no arguments, show available items (old behavior)
+    # If no arguments, show available items
     if not args:
-        return await take_item_start(update, context)
+        items = bot.list_items(free_only=True)
+        if not items:
+            await update.message.reply_text("No free items available.")
+            return
+
+        text = "<b>Available Free Items:</b>\n\n" + format_item_list(items)
+        text += "\n\n<b>Usage:</b> <code>/take &lt;item_name&gt; [purpose]</code>"
+        text += "\n<b>Examples:</b>"
+        text += "\n• <code>/take srv305 debugging</code>"
+        text += "\n• <code>/take WebServer1 production deployment</code>"
+        await update.message.reply_html(text)
+        return
 
     # Get item name (first argument)
     item_identifier = args[0]
@@ -1477,137 +1493,28 @@ async def take_item_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     item_id = bot.find_item_by_name_or_id(item_identifier)
     if item_id is None:
         await update.message.reply_text(f"Item '{item_identifier}' not found.")
-        return ConversationHandler.END
+        return
 
     # Check if item is available
     items = bot.list_items()
     item = next((i for i in items if i["id"] == item_id), None)
     if not item:
         await update.message.reply_text("Item not found.")
-        return ConversationHandler.END
+        return
 
     if item["owner"]:
         await update.message.reply_text(f"Item '{item['name']}' is already owned by {item['owner']}.")
-        return ConversationHandler.END
+        return
 
-    # If purpose provided, take immediately
-    if len(args) > 1:
-        purpose = " ".join(args[1:])
-        user = update.effective_user.username or str(update.effective_user.id)
-        success, message = bot.take_item(item_id, user, purpose)
-        await update.message.reply_text(message)
-
-        # Send notifications
-        if success:
-            await notify_item_action(
-                context.application,
-                item["name"],
-                item["type_id"],
-                "take",
-                user,
-                purpose,
-            )
-
-        return ConversationHandler.END
-
-    # If no purpose, ask for it
-    context.user_data["take_item_id"] = item_id
-    context.user_data["take_item_name"] = item["name"]
-    await update.message.reply_text(f"What is the purpose for taking <b>{item['name']}</b>?", parse_mode="HTML")
-    return TAKING_PURPOSE
-
-
-@require_authorization
-@log_command
-async def take_purpose_finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Finish taking item after purpose is provided"""
-    purpose = update.message.text.strip()
-    item_id = context.user_data.get("take_item_id")
-
-    if not item_id:
-        await update.message.reply_text("Error: Lost track of which item you wanted to take.")
-        return ConversationHandler.END
-
-    user = update.effective_user.username or str(update.effective_user.id)
-    success, message = bot.take_item(item_id, user, purpose)
-    await update.message.reply_text(message)
-
-    # Send notifications
-    if success:
-        # Get item details for notification
-        items = bot.list_items()
-        item = next((i for i in items if i["id"] == item_id), None)
-        if item:
-            await notify_item_action(
-                context.application,
-                item["name"],
-                item["type_id"],
-                "take",
-                user,
-                purpose,
-            )
-
-    # Clean up context data
-    context.user_data.pop("take_item_id", None)
-    context.user_data.pop("take_item_name", None)
-
-    return ConversationHandler.END
-
-
-@require_authorization
-@log_command
-async def take_item_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start taking an item"""
-    # Show available free items
-    items = bot.list_items(free_only=True)
-
-    if not items:
-        await update.message.reply_text("No free items available.")
-        return ConversationHandler.END
-
-    text = "<b>Available Free Items:</b>\n\n" + format_item_list(items)
-    text += "\nPlease enter the item ID or name you want to take, optionally with purpose:\n"
-    text += "Format: <code>&lt;item_id_or_name&gt; [purpose]</code>\n"
-    text += "Examples: <code>5 for testing</code> or <code>ItemName debugging</code>"
-
-    await update.message.reply_html(text)
-    return TAKING_ITEM
-
-
-@require_authorization
-@log_command
-async def take_item_finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Finish taking an item"""
-    text = update.message.text.strip()
-    parts = text.split(" ", 1)
-
-    # Find item by name or ID
-    item_id = bot.find_item_by_name_or_id(parts[0])
-    if item_id is None:
-        await update.message.reply_text("Item not found. Please enter a valid item ID or name.")
-        return TAKING_ITEM
-
-    # Check if item is available
-    items = bot.list_items()
-    item = next((i for i in items if i["id"] == item_id), None)
-    if not item:
-        await update.message.reply_text("Item not found.")
-        return TAKING_ITEM
-
-    if item["owner"]:
-        await update.message.reply_text(f"Item '{item['name']}' is already owned by {item['owner']}.")
-        return TAKING_ITEM
-
-    purpose = parts[1] if len(parts) > 1 else None
+    # Get purpose (all remaining arguments)
+    purpose = " ".join(args[1:]) if len(args) > 1 else None
     
-    # If no purpose provided, ask for it
     if not purpose:
-        context.user_data["take_item_id"] = item_id
-        context.user_data["take_item_name"] = item["name"]
-        await update.message.reply_text(f"What is the purpose for taking <b>{item['name']}</b>?", parse_mode="HTML")
-        return TAKING_PURPOSE
+        # Take the item with a default purpose
+        purpose = "No specific purpose provided"
+        logger.info(f"User {update.effective_user.username or update.effective_user.id} taking '{item['name']}' without explicit purpose")
 
-    # Take the item with purpose
+    # Take the item
     user = update.effective_user.username or str(update.effective_user.id)
     success, message = bot.take_item(item_id, user, purpose)
     await update.message.reply_text(message)
@@ -1623,7 +1530,86 @@ async def take_item_finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
             purpose,
         )
 
-    return ConversationHandler.END
+
+
+
+
+
+
+
+
+
+
+@require_authorization
+@log_command
+async def steal_item_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Steal an item with syntax: /steal <item_name> [purpose]"""
+    args = context.args
+    user = update.effective_user.username or str(update.effective_user.id)
+
+    # If no arguments, show stealable items
+    if not args:
+        items = [item for item in bot.list_items() if item["owner"] and item["owner"] != user]
+        if not items:
+            await update.message.reply_text("No items available to steal.")
+            return
+
+        text = "<b>Items You Can Steal:</b>\n\n" + format_item_list(items)
+        text += "\n\n<b>Usage:</b> <code>/steal &lt;item_name&gt; [purpose]</code>"
+        text += "\n<b>Examples:</b>"
+        text += "\n• <code>/steal srv305 urgent production issue</code>"
+        text += "\n• <code>/steal iPhone15 critical debugging</code>"
+        await update.message.reply_html(text)
+        return
+
+    # Get item name (first argument)
+    item_identifier = args[0]
+
+    # Find item by name or ID
+    item_id = bot.find_item_by_name_or_id(item_identifier)
+    if item_id is None:
+        await update.message.reply_text(f"Item '{item_identifier}' not found.")
+        return
+
+    # Check if item exists and is owned by someone else
+    items = bot.list_items()
+    item = next((i for i in items if i["id"] == item_id), None)
+    if not item:
+        await update.message.reply_text("Item not found.")
+        return
+
+    if not item["owner"]:
+        await update.message.reply_text(f"Item '{item['name']}' is not owned by anyone.")
+        return
+
+    if item["owner"] == user:
+        await update.message.reply_text(f"You already own '{item['name']}'.")
+        return
+
+    # Get purpose (all remaining arguments)
+    purpose = " ".join(args[1:]) if len(args) > 1 else None
+    
+    if not purpose:
+        # Steal the item with a default purpose
+        purpose = "No specific purpose provided"
+        logger.info(f"User {update.effective_user.username or update.effective_user.id} stealing '{item['name']}' from {item['owner']} without explicit purpose")
+
+    # Steal the item
+    previous_owner = item["owner"]
+    success, message = bot.steal_item(item_id, user, purpose)
+    await update.message.reply_text(message)
+
+    # Send notifications
+    if success:
+        await notify_item_action(
+            context.application,
+            item["name"],
+            item["type_id"],
+            "steal",
+            user,
+            purpose,
+            previous_owner,
+        )
 
 
 @require_authorization
@@ -1661,65 +1647,10 @@ async def free_item_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await notify_item_action(context.application, item["name"], item["type_id"], "free", user)
 
 
-@require_authorization
-@log_command
-async def steal_item_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start stealing an item"""
-    user = update.effective_user.username or str(update.effective_user.id)
-
-    # Show all owned items except user's own
-    items = [item for item in bot.list_items() if item["owner"] and item["owner"] != user]
-
-    if not items:
-        await update.message.reply_text("No items available to steal.")
-        return ConversationHandler.END
-
-    text = "<b>Items You Can Steal:</b>\n\n" + format_item_list(items)
-    text += "\nPlease enter the item ID or name you want to steal, optionally with purpose:\n"
-    text += "Format: <code>&lt;item_id_or_name&gt; [purpose]</code>\n"
-    text += "Examples: <code>5 urgent issue</code> or <code>iPhone15 critical bug</code>"
-
-    await update.message.reply_html(text)
-    return STEALING_ITEM
 
 
-@require_authorization
-@log_command
-async def steal_item_finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Finish stealing an item"""
-    text = update.message.text.strip()
-    parts = text.split(" ", 1)
 
-    # Find item by name or ID
-    item_id = bot.find_item_by_name_or_id(parts[0])
-    if item_id is None:
-        await update.message.reply_text("Item not found. Please enter a valid item ID or name.")
-        return STEALING_ITEM
 
-    purpose = parts[1] if len(parts) > 1 else None
-    user = update.effective_user.username or str(update.effective_user.id)
-
-    # Get item details before stealing for notification
-    items = bot.list_items()
-    item = next((i for i in items if i["id"] == item_id), None)
-    previous_owner = item["owner"] if item else None
-
-    success, message = bot.steal_item(item_id, user, purpose)
-    await update.message.reply_text(message)
-
-    # Send notifications
-    if success and item and previous_owner:
-        await notify_item_action(
-            context.application,
-            item["name"],
-            item["type_id"],
-            "steal",
-            user,
-            purpose,
-            previous_owner,
-        )
-
-    return ConversationHandler.END
 
 
 @require_authorization
@@ -2801,22 +2732,7 @@ def main():
         fallbacks=[CommandHandler("cancel", cancel)],
     )
 
-    take_item_handler = ConversationHandler(
-        entry_points=[CommandHandler("take", take_item_command)],
-        states={
-            TAKING_ITEM: [MessageHandler(filters.TEXT & ~filters.COMMAND, take_item_finish)],
-            TAKING_PURPOSE: [MessageHandler(filters.TEXT & ~filters.COMMAND, take_purpose_finish)],
-        },
-        fallbacks=[CommandHandler("cancel", cancel)],
-    )
 
-    steal_item_handler = ConversationHandler(
-        entry_points=[CommandHandler("steal", steal_item_start)],
-        states={
-            STEALING_ITEM: [MessageHandler(filters.TEXT & ~filters.COMMAND, steal_item_finish)],
-        },
-        fallbacks=[CommandHandler("cancel", cancel)],
-    )
 
     batch_handler = ConversationHandler(
         entry_points=[CommandHandler("batch", batch_command_start)],
@@ -2839,9 +2755,9 @@ def main():
     application.add_handler(CommandHandler("listtypes", list_types_command))
     application.add_handler(CommandHandler("deltype", delete_type_command))
     application.add_handler(CommandHandler("delitem", delete_item_command))
-    application.add_handler(take_item_handler)
+    application.add_handler(CommandHandler("take", take_item_command))
     application.add_handler(CommandHandler("free", free_item_command))
-    application.add_handler(steal_item_handler)
+    application.add_handler(CommandHandler("steal", steal_item_command))
     application.add_handler(CommandHandler("assign", assign_item_command))
     application.add_handler(CommandHandler("purge", purge_item_command))
     application.add_handler(CommandHandler("edititem", edit_item_command))
