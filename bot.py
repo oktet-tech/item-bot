@@ -1587,26 +1587,41 @@ async def take_item_finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Item not found. Please enter a valid item ID or name.")
         return TAKING_ITEM
 
-    purpose = parts[1] if len(parts) > 1 else None
-    user = update.effective_user.username or str(update.effective_user.id)
+    # Check if item is available
+    items = bot.list_items()
+    item = next((i for i in items if i["id"] == item_id), None)
+    if not item:
+        await update.message.reply_text("Item not found.")
+        return TAKING_ITEM
 
+    if item["owner"]:
+        await update.message.reply_text(f"Item '{item['name']}' is already owned by {item['owner']}.")
+        return TAKING_ITEM
+
+    purpose = parts[1] if len(parts) > 1 else None
+    
+    # If no purpose provided, ask for it
+    if not purpose:
+        context.user_data["take_item_id"] = item_id
+        context.user_data["take_item_name"] = item["name"]
+        await update.message.reply_text(f"What is the purpose for taking <b>{item['name']}</b>?", parse_mode="HTML")
+        return TAKING_PURPOSE
+
+    # Take the item with purpose
+    user = update.effective_user.username or str(update.effective_user.id)
     success, message = bot.take_item(item_id, user, purpose)
     await update.message.reply_text(message)
 
     # Send notifications
     if success:
-        # Get item details for notification
-        items = bot.list_items()
-        item = next((i for i in items if i["id"] == item_id), None)
-        if item:
-            await notify_item_action(
-                context.application,
-                item["name"],
-                item["type_id"],
-                "take",
-                user,
-                purpose,
-            )
+        await notify_item_action(
+            context.application,
+            item["name"],
+            item["type_id"],
+            "take",
+            user,
+            purpose,
+        )
 
     return ConversationHandler.END
 
